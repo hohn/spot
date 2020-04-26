@@ -27,6 +27,7 @@
 
 #define MAXARGS 9
 
+#define GROWTH 2
 #define LARGEGAP 2
 #define SMALLGAP 1
 
@@ -34,6 +35,7 @@
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
 
 #define TEXTSIZE(b) ((b)->s - (b)->g)
+#define DELETEBUF(b) ((b)->g = (b)->s)
 
 /* Byte string (can handle '\0' characters) */
 struct mem {
@@ -49,18 +51,15 @@ struct mdef {
     struct mdef *next;
 };
 
-/* Rear gap buffer (used for output and tokens) */
-struct rbuf {
+/*
+ * The rear gap buffer is used for output and tokens,
+ * and the front gap buffer is used for input.
+ */
+struct buf {
     char *p;
     size_t s; /* Buffer size */
     size_t g; /* Gap size */
-};
-
-/* Front gap buffer (used for input) */
-struct fbuf {
-    char *p;
-    size_t s; /* Buffer size */
-    size_t g; /* Gap size */
+    int rear; /* 1: gap is at the rear, 0: gap is at the front */
 };
 
 /* For argument collection */
@@ -71,47 +70,27 @@ struct marg {
     size_t quote_depth;
     size_t act_arg;
     size_t bracket_depth; /* Only unquoted brackets are counted */
-    struct rbuf arg[MAXARGS];
+    struct buf *arg[MAXARGS];
     struct marg *next;
 };
 
-struct fbuf *init_fbuf(size_t target_gap, size_t will_use) {
-    struct fbuf *fb;
-    if (AOF(target_gap, will_use)) return NULL;
-    if ((fb = malloc(sizeof(struct fbuf))) == NULL) return NULL;
-    if ((fb->p = malloc(target_gap + will_use)) == NULL) {
+struct buf *init_buf(size_t s, int rear) {
+    struct buf *fb;
+    if ((fb = malloc(sizeof(struct buf))) == NULL) return NULL;
+    if ((fb->p = malloc(s)) == NULL) {
         free(fb);
         return NULL;
     }
-    fb->s = target_gap + will_use;
-    fb->g = target_gap + will_use;
+    fb->s = s;
+    fb->g = s;
+    fb->rear = rear;
     return fb;
 }
 
-struct rbuf *init_rbuf(size_t target_gap, size_t will_use) {
-    struct rbuf *rb;
-    if (AOF(target_gap, will_use)) return NULL;
-    if ((rb = malloc(sizeof(struct fbuf))) == NULL) return NULL;
-    if ((rb->p = malloc(target_gap + will_use)) == NULL) {
-        free(rb);
-        return NULL;
-    }
-    rb->s = target_gap + will_use;
-    rb->g = target_gap + will_use;
-    return rb;
-}
-
-void free_fbuf(struct fbuf *fb) {
-    if (fb != NULL) {
-        free(fb->p);
-        free(fb);
-    }
-}
-
-void free_rbuf(struct rbuf *rb) {
-    if (rb != NULL) {
-        free(rb->p);
-        free(rb);
+void free_buf(struct buf *b) {
+    if (b != NULL) {
+        free(b->p);
+        free(b);
     }
 }
 
@@ -124,49 +103,32 @@ int filesize(char *fn, size_t *fs) {
     return 0;
 }
 
-int grow_fbuf(struct fbuf *fb, size_t target_gap, size_t will_use) {
+int grow_buf(struct buf *b, size_t fixed_chunk) {
     size_t new_s;
     size_t increase;
     char *t;
-    if (AOF(target_gap, will_use)) return 1;
-    new_s = TEXTSIZE(fb) + target_gap + will_use;
-    increase = new_s - fb->s;
-    if ((t = realloc(fb->p, new_s)) == NULL) return 1;
-    memmove(t + fb->g + increase, t + fb->g, TEXTSIZE(fb));
-    fb->p = t;
-    fb->s = new_s;
-    fb->g += increase;
+    if (MOF(b->s, GROWTH)) return 1;
+    if (AOF(b->s * GROWTH, fixed_chunk)) return 1;
+    new_s = b->s * GROWTH + fixed_chunk;
+    increase = new_s - b->s;
+    if ((t = realloc(b->p, new_s)) == NULL) return 1;
+    if (!b->rear) memmove(t + b->g + increase, t + b->g, TEXTSIZE(b));
+    b->p = t;
+    b->s = new_s;
+    b->g += increase;
     return 0;
 }
 
-int grow_rbuf(struct rbuf *rb, size_t target_gap, size_t will_use) {
-    size_t new_s;
-    size_t increase;
-    char *t;
-    if (AOF(target_gap, will_use)) return 1;
-    new_s = TEXTSIZE(rb) + target_gap + will_use;
-    increase = new_s - rb->s;
-    if ((t = realloc(rb->p, new_s)) == NULL) return 1;
-    rb->p = t;
-    rb->s = new_s;
-    rb->g += increase;
-    return 0;
-}
-
-void delete_rbuf(struct rbuf *rb) {
-    rb->g = rb->s;
-}
-
-int read_token(struct fbuf *input, struct rbuf *token, int *end_of_input) {
+int read_token(struct buf *input, struct buf *token, int *end_of_input) {
     char ch;
-    delete_rbuf(token);
+    DELETEBUF(token);
     if (input->g == input->s) {
         *end_of_input = 1;
         return 1;
     }
     *end_of_input = 0;
     ch = *(input->p + input->g);
-    if (!token->g) if (grow_rbuf(token, SMALLGAP, 1)) return 1;
+    if (!token->g) if (grow_buf(token, 0)) return 1;
     *(token->p + TEXTSIZE(token)) = ch;
     --token->g;
     ++input->g;
@@ -174,7 +136,7 @@ int read_token(struct fbuf *input, struct rbuf *token, int *end_of_input) {
         while (input->g < input->s) {
             ch = *(input->p + input->g);
             if (!isalnum(ch) && ch != '_') break;
-            if (!token->g) if (grow_rbuf(token, SMALLGAP, 1)) return 1;
+            if (!token->g) if (grow_buf(token, 0)) return 1;
             *(token->p + TEXTSIZE(token)) = ch;
             --token->g;
             ++input->g;
@@ -183,12 +145,13 @@ int read_token(struct fbuf *input, struct rbuf *token, int *end_of_input) {
     return 0;
 }
 
-int insert_file(struct fbuf *fb, char *fn) {
+int insert_file(struct buf *fb, char *fn) {
     size_t fs;
     FILE *fp;
+    if (fb->rear) return 1;
     if (filesize(fn, &fs)) return 1;
     if (!fs) return 0;
-    if (fb->g < fs) if(grow_fbuf(fb, LARGEGAP, fs)) return 1;
+    if (fb->g < fs) if(grow_buf(fb, fs)) return 1;
     if ((fp = fopen(fn, "r")) == NULL) return 1;
     if (fread(fb->p + fb->g - fs, 1, fs, fp) != fs) {
         fclose(fp);
@@ -199,18 +162,21 @@ int insert_file(struct fbuf *fb, char *fn) {
     return 0;
 }
 
-int insert_rbuf_in_fbuf(struct fbuf *fb, struct rbuf *rb) {
+int insert_rear_in_front_buf(struct buf *fb, struct buf *rb) {
     size_t ts = TEXTSIZE(rb);
-    if (fb->g < ts) if (grow_fbuf(fb, LARGEGAP, ts)) return 1;
+    if (fb->rear) return 1;
+    if (!rb->rear) return 1;
+    if (fb->g < ts) if (grow_buf(fb, ts)) return 1;
     memcpy(fb->p + fb->g - ts, rb->p, ts);
     fb->g -= ts;
     return 0;
 }
 
-int read_stdin(struct rbuf *rb) {
+int read_stdin(struct buf *rb) {
     int x;
+    if (!rb->rear) return 1;
     while ((x = getchar()) != EOF) {
-        if (!rb->g) if (grow_rbuf(rb, LARGEGAP, 1)) return 1;
+        if (!rb->g) if (grow_buf(rb, 0)) return 1;
         *(rb->p + TEXTSIZE(rb)) = x;
         --rb->g;
     }
@@ -218,7 +184,7 @@ int read_stdin(struct rbuf *rb) {
     return 0;
 }
 
-void print_token(struct rbuf *token) {
+void print_token(struct buf *token) {
     /* This function is just for testing */
     size_t i = 0;
     size_t ts = TEXTSIZE(token);
@@ -226,10 +192,7 @@ void print_token(struct rbuf *token) {
     if (!ts) return;
     for (i = 0; i < ts; ++i) {
         ch = *(token->p + i);
-        if (ch == '\n') printf("\\n");
-        else if (ch == '\t') printf("\\t");
-        else if (ch == ' ') printf("SPC");
-        else putchar(ch);
+        printf(isgraph(ch) ? "%c" : "%02X", ch);
     }
     putchar('\n');
 }
@@ -237,47 +200,51 @@ void print_token(struct rbuf *token) {
 int main(int argc, char **argv) {
     size_t fs;
     size_t total_fs = 0;
-    struct rbuf *tmp;
-    struct fbuf *input;
-    struct rbuf *token;
+    struct buf *tmp;
+    struct buf *input;
+    struct buf *token;
     int end_of_input;
     int j;
 
     if (argc < 1) return 1;
 
     if (argc == 1) {
-        if ((tmp = init_rbuf(LARGEGAP, 1)) == NULL) return 1;
+        if ((tmp = init_buf(LARGEGAP, 1)) == NULL) return 1;
         if (read_stdin(tmp)) {
-            free_rbuf(tmp);
+            free_buf(tmp);
             return 1;
         }
-        if ((input = init_fbuf(LARGEGAP, TEXTSIZE(tmp))) == NULL) {
-            free_rbuf(tmp);
+        if (AOF(LARGEGAP, TEXTSIZE(tmp))) {
+            free_buf(tmp);
             return 1;
         }
-        if (insert_rbuf_in_fbuf(input, tmp)) {
-            free_rbuf(tmp);
-            free_fbuf(input);
+        if ((input = init_buf(LARGEGAP + TEXTSIZE(tmp), 0)) == NULL) {
+            free_buf(tmp);
             return 1;
         }
-        free_rbuf(tmp);
+        if (insert_rear_in_front_buf(input, tmp)) {
+            free_buf(tmp);
+            free_buf(input);
+            return 1;
+        }
+        free_buf(tmp);
     } else {
         for (j = 1; j < argc; ++j) {
             if (filesize(*(argv + j), &fs)) return 1;
             total_fs += fs;
         }
-        if (AOF(total_fs, LARGEGAP)) return 1;
-        if ((input = init_fbuf(LARGEGAP, total_fs)) == NULL) return 1;
+        if (AOF(LARGEGAP, total_fs)) return 1;
+        if ((input = init_buf(LARGEGAP + total_fs, 0)) == NULL) return 1;
         for (j = argc - 1; j; --j) {
             if (insert_file(input, *(argv + j))) {
-                free_fbuf(input);
+                free_buf(input);
                 return 1;
             }
         }
     }
 
-    if ((token = init_rbuf(SMALLGAP, 1)) == NULL) {
-        free_fbuf(input);
+    if ((token = init_buf(SMALLGAP, 1)) == NULL) {
+        free_buf(input);
         return 1;
     }
 
@@ -285,13 +252,13 @@ int main(int argc, char **argv) {
         print_token(token);
     }
     if (!end_of_input) {
-        free_fbuf(input);
-        free_rbuf(token);
+        free_buf(input);
+        free_buf(token);
         return 1;
     }
 
 
-    free_fbuf(input);
-    free_rbuf(token);
+    free_buf(input);
+    free_buf(token);
     return 0;
 }
