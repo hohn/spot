@@ -94,6 +94,121 @@ void free_buf(struct buf *b) {
     }
 }
 
+struct mdef *create_mdef_node(void) {
+    struct mdef *md;
+    if ((md = malloc(sizeof(struct mdef))) == NULL) return NULL;
+    md->prev = NULL;
+    md->name.p = NULL;
+    md->name.s = 0;
+    md->text.p = NULL;
+    md->text.s = 0;
+    md->next = NULL;
+    return md;
+}
+
+int stack_on_mdef(struct mdef **md) {
+    struct mdef *t;
+    if ((t = create_mdef_node()) == NULL) return 1;
+    if (*md != NULL) {
+        t->next = *md;
+        (*md)->prev = t;
+    }
+    *md = t;
+    return 0;
+}
+
+int buf_mem_cmp(struct buf *rb, struct mem *m) {
+    if (rb == NULL || m == NULL || rb->p == NULL || m->p == NULL
+                            || !rb->s || rb->s != m->s) return 1;
+    if(strncmp(rb->p, m->p, rb->s)) return 1;
+    return 0;
+}
+
+int buf_char_cmp(struct buf *rb, char ch) {
+    if (rb == NULL || rb->p == NULL || rb->s != 1) return 1;
+    if(*(rb->p + TEXTSIZE(rb)) == ch) return 0;
+    return 1;
+}
+
+struct mem *token_search(struct mdef *md, struct buf *token) {
+    struct mdef *t = md, *next;
+    while (t != NULL) {
+        next = t->next;
+        if (!buf_mem_cmp(token, &md->name)) return &t->text;
+        t = next;
+    }
+    return NULL;
+}
+
+void free_mdef_node(struct mdef *md) {
+    if (md != NULL) {
+        free(md->name.p);
+        free(md->text.p);
+        free(md);
+    }
+}
+
+void free_mdef_linked_list(struct mdef *md) {
+    struct mdef *t = md, *next;
+    while (t != NULL) {
+        next = t->next;
+        free_mdef_node(t);
+        t = next;
+    }
+}
+
+void free_marg_node(struct marg *ma) {
+    size_t i;
+    if (ma != NULL) {
+        for (i = 0; i < MAXARGS; ++i) {
+            free_buf(ma->arg[i]);
+        }
+        free(ma);
+    }
+}
+
+void free_marg_linked_list(struct marg *ma) {
+    struct marg *t = ma, *next;
+    while (t != NULL) {
+        next = t->next;
+        free_marg_node(t);
+        t = next;
+    }
+}
+
+struct marg *create_marg_node(void) {
+    size_t i;
+    struct marg *ma;
+    if ((ma = malloc(sizeof(struct marg))) == NULL) return NULL;
+    ma->prev = NULL;
+    ma->text.p = NULL;
+    ma->text.s = 0;
+    ma->quote_on = 0;
+    ma->quote_depth = 0;
+    ma->act_arg = 0;
+    ma->bracket_depth = 0;
+    ma->next = NULL;
+    for (i = 0; i < MAXARGS; ++i) ma->arg[i] = NULL;
+    for (i = 0; i < MAXARGS; ++i) {
+        if ((ma->arg[i] = init_buf(SMALLGAP, 1)) == NULL) {
+            free_marg_node(ma);
+            return NULL;
+        }
+    }
+    return ma;
+}
+
+int stack_on_marg(struct marg **ma) {
+    struct marg *t;
+    if ((t = create_marg_node()) == NULL) return 1;
+    if (*ma != NULL) {
+        t->next = *ma;
+        (*ma)->prev = t;
+    }
+    *ma = t;
+    return 0;
+}
+
 int filesize(char *fn, size_t *fs) {
     struct stat st;
     if (stat(fn, &st)) return 1;
@@ -204,6 +319,8 @@ int main(int argc, char **argv) {
     struct buf *input;
     struct buf *token;
     int end_of_input;
+    int quote_on = 0;
+    size_t quote_depth = 0;
     int j;
 
     if (argc < 1) return 1;
@@ -249,7 +366,11 @@ int main(int argc, char **argv) {
     }
 
     while (!read_token(input, token, &end_of_input)) {
-        print_token(token);
+        if (!buf_char_cmp(token, '`')) {
+            if (!quote_on) quote_on = 1;
+            else ++quote_depth;
+        } /* Work in progress */
+
     }
     if (!end_of_input) {
         free_buf(input);
