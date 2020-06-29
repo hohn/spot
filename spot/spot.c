@@ -41,6 +41,16 @@ int move_left(struct buffer *b, size_t mult)
     return 0;
 }
 
+int move_right(struct buffer *b, size_t mult)
+{
+    if (mult > (size_t) (b->e - b->c)) return 1;
+    memmove(b->g, b->c, mult);
+    b->g += mult;
+    b->c += mult;
+    return 0;
+}
+
+
 int main (void)
 {
     return 0;
