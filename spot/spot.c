@@ -18,3 +18,14 @@
  * spot: A minimalistic and fast text editor.
  * Dedicated to my son who was only a 4mm `spot' in his first ultrasound.
  */
+
+struct buffer {
+    char *fn;  /* Filename where the buffer will save to */
+    char *a;   /* Start of buffer */
+    char *g;   /* Start of gap */
+    char *c;   /* Cursor (after gap) */
+    char *e;   /* End of buffer */
+    char *d;   /* Draw start */
+    size_t m;  /* Mark index */
+    int m_set; /* Mark set indicator */
+};
