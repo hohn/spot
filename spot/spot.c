@@ -19,6 +19,8 @@
  * Dedicated to my son who was only a 4mm `spot' in his first ultrasound.
  */
 
+#include <string.h>
+
 struct buffer {
     char *fn;  /* Filename where the buffer will save to */
     char *a;   /* Start of buffer */
@@ -29,3 +31,17 @@ struct buffer {
     size_t m;  /* Mark index */
     int m_set; /* Mark set indicator */
 };
+
+int move_left(struct buffer *b, size_t mult)
+{
+    if (mult > (size_t) (b->g - b->a)) return 1;
+    memmove(b->c - mult, b->g - mult, mult);
+    b->g -= mult;
+    b->c -= mult;
+    return 0;
+}
+
+int main (void)
+{
+    return 0;
+}
