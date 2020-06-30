@@ -20,7 +20,13 @@
  */
 
 
+
 #include <sys/stat.h>
+
+#ifdef _WIN32
+    #include <windows.h>
+#endif
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,8 +34,8 @@
 
 #define GAP 2
 
-/* #ifdef _WIN32 */
-
+#define CLEAR_SCREEN printf("\033[2J")
+#define MOVE_CURSOR(y, x) printf("\033[" #y ";" #x "H")
 
 struct buffer {
     char *fn;  /* Filename where the buffer will save to */
@@ -136,7 +142,31 @@ struct buffer *init_buffer(size_t req)
     return b;
 }
 
+#ifdef _WIN32
+int setup_graphics(void)
+{
+    HANDLE out;
+    DWORD mode;
+    if ((out = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE) return 1;
+    if (!GetConsoleMode(out, &mode)) return 1;
+    if (!SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) return 1;
+    return 0;
+}
+#endif
+
 int main (void)
 {
+    struct buffer *b = init_buffer(10);
+    insert_char(b, 'c', 5);
+
+#ifdef _WIN32
+    setup_graphics();
+#endif
+
+    CLEAR_SCREEN;
+    MOVE_CURSOR(0, 0);
+
+    getchar();
+
     return 0;
 }
