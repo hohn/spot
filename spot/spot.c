@@ -154,8 +154,25 @@ int setup_graphics(void)
 }
 #endif
 
+
+#ifdef _WIN32
+int get_screen_size(int *height, int *width)
+{
+    HANDLE out;
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if ((out = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE) return 1;
+    if(!GetConsoleScreenBufferInfo(out, &info)) return 1;
+    *height = info.srWindow.Bottom - info.srWindow.Top + 1;
+    *width = info.srWindow.Right - info.srWindow.Left + 1;
+    return 0;
+}
+#endif
+
 int main (void)
 {
+
+    int h, w;
+
     struct buffer *b = init_buffer(10);
     insert_char(b, 'c', 5);
 
@@ -165,6 +182,9 @@ int main (void)
 
     CLEAR_SCREEN;
     MOVE_CURSOR(0, 0);
+
+    if (get_screen_size(&h, &w)) printf("get_screen_size failed");
+    printf("height: %d, width: %d", h, w);
 
     getchar();
 
