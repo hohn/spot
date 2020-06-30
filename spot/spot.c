@@ -21,6 +21,10 @@
 
 #include <string.h>
 
+
+/* #ifdef _WIN32 */
+
+
 struct buffer {
     char *fn;  /* Filename where the buffer will save to */
     char *a;   /* Start of buffer */
@@ -50,6 +54,27 @@ int move_right(struct buffer *b, size_t mult)
     return 0;
 }
 
+int insert_char(struct buffer *b, char ch, size_t mult)
+{
+    if (mult > (size_t) (b->c - b->g)) if (grow_gap(b, mult)) return 1;
+    memset(b->g, ch, mult);
+    b->g += mult;
+    return 0;
+}
+
+int delete_char(struct buffer *b, size_t mult)
+{
+    if (mult > (size_t) (b->e - b->c)) return 1;
+    b->c += mult;
+    return 0;
+}
+
+int backspace_char(struct buffer *b, size_t mult)
+{
+    if (mult > (size_t) (b->g - b->a)) return 1;
+    b->g -= mult;
+    return 0;
+}
 
 int main (void)
 {
