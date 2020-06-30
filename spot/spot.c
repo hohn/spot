@@ -22,6 +22,7 @@
 
 #include <sys/stat.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 
@@ -56,6 +57,29 @@ int move_right(struct buffer *b, size_t mult)
     memmove(b->g, b->c, mult);
     b->g += mult;
     b->c += mult;
+    return 0;
+}
+
+int grow_gap(struct buffer *b, size_t req)
+{
+    size_t target_gap, current_gap, increase, current_size, target_size;
+    char *old_a = b->a, *t;
+    if (req > SIZE_MAX - GAP) return 1;
+    target_gap = req + GAP;
+    current_gap = b->c - b->g;
+    if (target_gap <= current_gap) return 0;
+    increase = target_gap - current_gap;
+    current_size = b->e - b->a + 1;
+    target_size = current_size + increase;
+    if ((t = realloc(b->a, target_size)) == NULL) return 1;
+    b->a = t;
+    b->g = b->g - old_a + b->a;
+    b->c = b->c - old_a + b->a;
+    b->e = b->e - old_a + b->a;
+    b->d = b->d - old_a + b->a;
+    memmove(b->c + increase, b->c, b->e - b->c + 1);
+    b->c += increase;
+    b->e += increase;
     return 0;
 }
 
