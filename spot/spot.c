@@ -169,6 +169,7 @@ int write_buffer(struct buffer *b, char *fn)
     size_t len;
     char *backup_fn;
     FILE *fp;
+    size_t num;
     if (!stat_file(fn, &fs, &perm) && fs) {
         len = strlen(fn);
         if (len > SIZE_MAX - 2) return 1;
@@ -183,12 +184,14 @@ int write_buffer(struct buffer *b, char *fn)
         free(backup_fn);
         backup_ok = 1;
     }
-    if ((fp = fopen(b->fn, "wb")) == NULL) return 1;
-    if (fwrite(b->a, 1, b->g - b->a, fp) != b->g - b->a) {
+    if ((fp = fopen(fn, "wb")) == NULL) return 1;
+    num = (size_t) (b->g - b->a);
+    if (fwrite(b->a, 1, num, fp) != num) {
         fclose(fp);
         return 1;
     }
-    if (fwrite(b->c, 1, b->e - b->c, fp) != b->e - b->c) {
+    num = (size_t) (b->e - b->c);
+    if (fwrite(b->c, 1, num, fp) != num) {
         fclose(fp);
         return 1;
     }
@@ -227,25 +230,14 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
-int main (void)
+int main (int argc, char **argv)
 {
 
-    int h, w;
 
-    struct buffer *b = init_buffer(10);
-    insert_char(b, 'c', 5);
 
 #ifdef _WIN32
     setup_graphics();
 #endif
-
-    CLEAR_SCREEN;
-    MOVE_CURSOR(0, 0);
-
-    if (get_screen_size(&h, &w)) printf("get_screen_size failed");
-    printf("height: %d, width: %d", h, w);
-
-    getchar();
 
     return 0;
 }
