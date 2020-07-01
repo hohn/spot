@@ -28,6 +28,7 @@
 #endif
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -73,7 +74,6 @@ int grow_gap(struct buffer *b, size_t req)
     if (req > SIZE_MAX - GAP) return 1;
     target_gap = req + GAP;
     current_gap = b->c - b->g;
-    if (target_gap <= current_gap) return 0;
     increase = target_gap - current_gap;
     current_size = b->e - b->a + 1;
     target_size = current_size + increase;
@@ -140,6 +140,22 @@ struct buffer *init_buffer(size_t req)
     b->m = 0;
     b->m_set = 0;
     return b;
+}
+
+int insert_file(struct buffer *b, char *fn)
+{
+    size_t fs;
+    FILE *fp;
+    if (get_filesize(fn, &fs)) return 1;
+    if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
+    if ((fp = fopen(fn, "rb")) == NULL) return 1;
+    if (fread(b->g, 1, fs, fp) != fs) {
+        fclose(fp);
+        return 1;
+    }
+    if (fclose(fp)) return 1;
+    b->g += fs;
+    return 0;
 }
 
 #ifdef _WIN32
