@@ -111,12 +111,14 @@ int backspace_char(struct buffer *b, size_t mult)
     return 0;
 }
 
-int get_filesize(char *fn, size_t *fs)
+int stat_file(char *fn, size_t *fs, unsigned short* perm)
 {
     struct _stat64 st;
     if (_stat64(fn, &st)) return 1;
+    if (!(st.st_mode & _S_IFREG)) return 1;
     if (st.st_size > SIZE_MAX || st.st_size < 0) return 1;
     *fs = (size_t) st.st_size;
+    *perm = st.st_mode & 0777;
     return 0;
 }
 
@@ -145,8 +147,9 @@ struct buffer *init_buffer(size_t req)
 int insert_file(struct buffer *b, char *fn)
 {
     size_t fs;
+    unsigned short perm;
     FILE *fp;
-    if (get_filesize(fn, &fs)) return 1;
+    if (stat_file(fn, &fs, &perm)) return 1;
     if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
     if ((fp = fopen(fn, "rb")) == NULL) return 1;
     if (fread(b->g, 1, fs, fp) != fs) {
@@ -155,6 +158,46 @@ int insert_file(struct buffer *b, char *fn)
     }
     if (fclose(fp)) return 1;
     b->g += fs;
+    return 0;
+}
+
+int write_buffer(struct buffer *b, char *fn)
+{
+    int backup_ok = 0;
+    size_t fs;
+    unsigned short perm;
+    size_t len;
+    char *backup_fn;
+    FILE *fp;
+    if (!stat_file(fn, &fs, &perm) && fs) {
+        len = strlen(fn);
+        if (len > SIZE_MAX - 2) return 1;
+        if ((backup_fn = malloc(len + 2)) == NULL) return 1;
+        memcpy(backup_fn, fn, len);
+        *(backup_fn + len) = '~';
+        *(backup_fn + len + 1) = '\0';
+        if (rename(fn, backup_fn)) {
+            free(backup_fn);
+            return 1;
+        }
+        free(backup_fn);
+        backup_ok = 1;
+    }
+    if ((fp = fopen(b->fn, "wb")) == NULL) return 1;
+    if (fwrite(b->a, 1, b->g - b->a, fp) != b->g - b->a) {
+        fclose(fp);
+        return 1;
+    }
+    if (fwrite(b->c, 1, b->e - b->c, fp) != b->e - b->c) {
+        fclose(fp);
+        return 1;
+    }
+    if (fclose(fp)) return 1;
+
+#ifndef _WIN32
+    if (backup_ok && chmod(fn, perm)) return 1;
+#endif
+
     return 0;
 }
 
