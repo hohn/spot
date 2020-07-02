@@ -38,6 +38,8 @@
 #define CLEAR_SCREEN printf("\033[2J")
 #define MOVE_CURSOR(y, x) printf("\033[" #y ";" #x "H")
 
+#define QUIT(rv) do {ret = rv; goto clean_up;} while (0)
+
 struct buffer {
     char *fn;  /* Filename where the buffer will save to */
     char *a;   /* Start of buffer */
@@ -141,6 +143,7 @@ int insert_file(struct buffer *b, char *fn)
     if (_stat64(fn, &st)) return 1;
     if (!(st.st_mode & _S_IFREG)) return 1;
     if (st.st_size > SIZE_MAX || st.st_size < 0) return 1;
+    if (!st.st_size) return 0;
     fs = (size_t) st.st_size;
     if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
     if ((fp = fopen(fn, "rb")) == NULL) return 1;
@@ -194,6 +197,21 @@ int write_buffer(struct buffer *b, char *fn)
     return 0;
 }
 
+int rename_buffer(struct buffer *b, char *new_name)
+{
+    size_t len;
+    char *t;
+    if (new_name == NULL) return 1;
+    len = strlen(new_name);
+    if (!len) return 1;
+    if (len == SIZE_MAX) return 1;
+    if ((t = malloc(len + 1)) == NULL) return 1;
+    *(t + len) = '\0';
+    free(b->fn);
+    b->fn = t;
+    return 0;
+}
+
 #ifdef _WIN32
 int setup_graphics(void)
 {
@@ -220,14 +238,38 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
-int main (int argc, char **argv)
+int main(int argc, char **argv)
 {
-
-
+    int ret = 0;
+    struct buffer **z;
+    size_t zs;
+    size_t i;
+    struct _stat64 st;
+    if (argc <= 1) {
+        fprintf(stderr, "Usage: %s file...\n", *argv);
+        return 1;
+    }
+    if (argc > SIZE_MAX) return 1;
+    zs = argc - 1;
+    if ((z = malloc(zs * sizeof(struct buffer *))) == NULL) return 1;
+    for (i = 0; i < zs; ++i) {
+        if (!_stat64(*(argv + i + 1), &st)) {
+            if (!(st.st_mode & _S_IFREG)
+                || st.st_size > SIZE_MAX || st.st_size < 0) QUIT(1);
+            if ((*(z + i) = init_buffer((size_t) st.st_size)) == NULL) QUIT(1);
+            if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
+            if (insert_file(*(z + i), (*(z + i))->fn)) QUIT(1);
+        } else {
+            if ((*(z + i) = init_buffer(0)) == NULL) QUIT(1);
+            if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
+        }
+    }
 
 #ifdef _WIN32
     setup_graphics();
 #endif
 
-    return 0;
+clean_up:
+
+    return ret;
 }
