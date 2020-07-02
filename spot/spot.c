@@ -19,8 +19,6 @@
  * Dedicated to my son who was only a 4mm `spot' in his first ultrasound.
  */
 
-
-
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -32,13 +30,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 #define GAP 2
 
-#define CLEAR_SCREEN printf("\033[2J")
+#define CLEAR_SCREEN() printf("\033[2J")
 #define MOVE_CURSOR(y, x) printf("\033[" #y ";" #x "H")
 
-#define QUIT(rv) do {ret = rv; goto clean_up;} while (0)
+#define QUIT(r) do {ret = r; goto clean_up;} while (0)
 
 struct buffer {
     char *fn;  /* Filename where the buffer will save to */
@@ -46,7 +43,7 @@ struct buffer {
     char *g;   /* Start of gap */
     char *c;   /* Cursor (after gap) */
     char *e;   /* End of buffer */
-    char *d;   /* Draw start */
+    size_t d;  /* Draw start index */
     size_t m;  /* Mark index */
     int m_set; /* Mark set indicator */
 };
@@ -84,7 +81,6 @@ int grow_gap(struct buffer *b, size_t req)
     b->g = b->g - old_a + b->a;
     b->c = b->c - old_a + b->a;
     b->e = b->e - old_a + b->a;
-    b->d = b->d - old_a + b->a;
     memmove(b->c + increase, b->c, b->e - b->c + 1);
     b->c += increase;
     b->e += increase;
@@ -129,7 +125,7 @@ struct buffer *init_buffer(size_t req)
     b->g = b->a;
     *(b->e = b->a + req + GAP - 1) = '~';
     b->c = b->e;
-    b->d = b->a;
+    b->d = 0;
     b->m = 0;
     b->m_set = 0;
     return b;
@@ -141,8 +137,8 @@ int insert_file(struct buffer *b, char *fn)
     size_t fs;
     FILE *fp;
     if (_stat64(fn, &st)) return 1;
-    if (!(st.st_mode & _S_IFREG)) return 1;
-    if (st.st_size > SIZE_MAX || st.st_size < 0) return 1;
+    if (!((st.st_mode & _S_IFMT) == _S_IFREG)
+        || st.st_size > SIZE_MAX || st.st_size < 0) return 1;
     if (!st.st_size) return 0;
     fs = (size_t) st.st_size;
     if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
@@ -206,6 +202,7 @@ int rename_buffer(struct buffer *b, char *new_name)
     if (!len) return 1;
     if (len == SIZE_MAX) return 1;
     if ((t = malloc(len + 1)) == NULL) return 1;
+    memcpy(t, new_name, len);
     *(t + len) = '\0';
     free(b->fn);
     b->fn = t;
@@ -224,7 +221,6 @@ int setup_graphics(void)
 }
 #endif
 
-
 #ifdef _WIN32
 int get_screen_size(int *height, int *width)
 {
@@ -238,38 +234,80 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
+/*
+void centre_cursor(struct buffer *b)
+{
+
+}
+*/
+
+int draw_screen(struct buffer *b, struct buffer *cl, int cla)
+{
+    int h, w;
+    size_t ci = b->g - b->a; /* Cursor index */
+    char *q;
+    if (get_screen_size(&h, &w)) return 1;
+    if (h < 3 || w < 1) return 1;
+    CLEAR_SCREEN();
+    MOVE_CURSOR(0, 0);
+  /*  if (ci < b->d) centre_cursor(b); */
+    q = b->a + b->d;
+    while (q != b->g) {putchar(*q); ++q;}
+    q = b->c;
+    while (q != b->e) {putchar(*q); ++q;}
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int ret = 0;
-    struct buffer **z;
-    size_t zs;
+    struct buffer **z; /* The text buffers */
+    size_t zs;         /* Number of text buffers */
+    size_t za = 0;     /* The index of the active text buffer */
+    struct buffer *cl; /* Command line buffer */
+    int cla = 0;       /* Command line buffer is active */
     size_t i;
     struct _stat64 st;
-    if (argc <= 1) {
-        fprintf(stderr, "Usage: %s file...\n", *argv);
-        return 1;
-    }
+    int running = 1;
+    int x;
     if (argc > SIZE_MAX) return 1;
-    zs = argc - 1;
-    if ((z = malloc(zs * sizeof(struct buffer *))) == NULL) return 1;
-    for (i = 0; i < zs; ++i) {
-        if (!_stat64(*(argv + i + 1), &st)) {
-            if (!(st.st_mode & _S_IFREG)
-                || st.st_size > SIZE_MAX || st.st_size < 0) QUIT(1);
-            if ((*(z + i) = init_buffer((size_t) st.st_size)) == NULL) QUIT(1);
-            if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
-            if (insert_file(*(z + i), (*(z + i))->fn)) QUIT(1);
-        } else {
-            if ((*(z + i) = init_buffer(0)) == NULL) QUIT(1);
-            if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
+    if (argc > 1) {
+        zs = argc - 1;
+        if ((z = malloc(zs * sizeof(struct buffer *))) == NULL) return 1;
+        for (i = 0; i < zs; ++i) {
+            if (!_stat64(*(argv + i + 1), &st)) {
+                if (!((st.st_mode & _S_IFMT) == _S_IFREG)
+                    || st.st_size > SIZE_MAX || st.st_size < 0) QUIT(1);
+                if ((*(z + i) = init_buffer((size_t) st.st_size)) == NULL) QUIT(1);
+                if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
+                if (insert_file(*(z + i), (*(z + i))->fn)) QUIT(1);
+            } else {
+                if ((*(z + i) = init_buffer(0)) == NULL) QUIT(1);
+                if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
+            }
         }
+    } else {
+        zs = 1;
+        if ((z = malloc(sizeof(struct buffer *))) == NULL) return 1;
+        if ((*z = init_buffer(0)) == NULL) QUIT(1);
     }
+    if ((cl = init_buffer(0)) == NULL) QUIT(1);
 
 #ifdef _WIN32
     setup_graphics();
 #endif
 
+    while (running) {
+        draw_screen(*(z + za), cl, cla);
+        x = getchar();
+
+        if (x == 'q') running = 0;
+
+    }
+
 clean_up:
+
+if (ret) printf("FAIL\n");
 
     return ret;
 }
