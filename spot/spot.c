@@ -111,17 +111,6 @@ int backspace_char(struct buffer *b, size_t mult)
     return 0;
 }
 
-int stat_file(char *fn, size_t *fs, unsigned short* perm)
-{
-    struct _stat64 st;
-    if (_stat64(fn, &st)) return 1;
-    if (!(st.st_mode & _S_IFREG)) return 1;
-    if (st.st_size > SIZE_MAX || st.st_size < 0) return 1;
-    *fs = (size_t) st.st_size;
-    *perm = st.st_mode & 0777;
-    return 0;
-}
-
 struct buffer *init_buffer(size_t req)
 {
     struct buffer *b;
@@ -146,10 +135,13 @@ struct buffer *init_buffer(size_t req)
 
 int insert_file(struct buffer *b, char *fn)
 {
+    struct _stat64 st;
     size_t fs;
-    unsigned short perm;
     FILE *fp;
-    if (stat_file(fn, &fs, &perm)) return 1;
+    if (_stat64(fn, &st)) return 1;
+    if (!(st.st_mode & _S_IFREG)) return 1;
+    if (st.st_size > SIZE_MAX || st.st_size < 0) return 1;
+    fs = (size_t) st.st_size;
     if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
     if ((fp = fopen(fn, "rb")) == NULL) return 1;
     if (fread(b->g, 1, fs, fp) != fs) {
@@ -163,14 +155,12 @@ int insert_file(struct buffer *b, char *fn)
 
 int write_buffer(struct buffer *b, char *fn)
 {
+    struct _stat64 st;
     int backup_ok = 0;
-    size_t fs;
-    unsigned short perm;
-    size_t len;
+    size_t len, num;
     char *backup_fn;
     FILE *fp;
-    size_t num;
-    if (!stat_file(fn, &fs, &perm) && fs) {
+    if (!_stat64(fn, &st) && st.st_mode & _S_IFREG) {
         len = strlen(fn);
         if (len > SIZE_MAX - 2) return 1;
         if ((backup_fn = malloc(len + 2)) == NULL) return 1;
@@ -198,7 +188,7 @@ int write_buffer(struct buffer *b, char *fn)
     if (fclose(fp)) return 1;
 
 #ifndef _WIN32
-    if (backup_ok && chmod(fn, perm)) return 1;
+    if (backup_ok && chmod(fn, st.st_mode & 0777)) return 1;
 #endif
 
     return 0;
