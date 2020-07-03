@@ -33,7 +33,7 @@
 #define GAP 2
 
 #define CLEAR_SCREEN() printf("\033[2J")
-#define MOVE_CURSOR(y, x) printf("\033[" #y ";" #x "H")
+#define CLEAR_LINE() printf("\033[2K")
 
 #define QUIT(r) do {ret = r; goto clean_up;} while (0)
 
@@ -234,27 +234,105 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
-/*
-void centre_cursor(struct buffer *b)
-{
+#define MOVE_CURSOR(y, x)
 
+void move_cursor(int y, int x)
+{
+    printf("\033[%d;%dH", y, x);
+}
+
+/*
+void centre_cursor(struct buffer *b, int h, int w)
+{
+    char *q;
+    size_t line_count = 1;
+    if (b->g == b->a) {
+        b->d = 0;
+        return;
+    }
+    q = b->g - 1;
+    while (1) {
+        if (
+    }
 }
 */
 
 int draw_screen(struct buffer *b, struct buffer *cl, int cla)
 {
-    int h, w;
+    int h, w, y, x, cy, cx;
     size_t ci = b->g - b->a; /* Cursor index */
-    char *q;
+    char *q, ch;
     if (get_screen_size(&h, &w)) return 1;
     if (h < 3 || w < 1) return 1;
+    /* if (ci < b->d) centre_cursor(b); */
+draw_text:
     CLEAR_SCREEN();
-    MOVE_CURSOR(0, 0);
-  /*  if (ci < b->d) centre_cursor(b); */
+    move_cursor(y = 0, x = 0);
     q = b->a + b->d;
-    while (q != b->g) {putchar(*q); ++q;}
+    while (q != b->g) {
+        ch = *q++;
+        if (ch == '\n' || x == w - 1) {
+            if (y == h - 3) {
+                /* centre_cursor(b, h - 2, w); */
+                goto draw_text;
+            }
+            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            ++y;
+            x = 0;
+        } else {
+            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            ++x;
+        }
+    }
+    cy = y;
+    cx = x;
     q = b->c;
-    while (q != b->e) {putchar(*q); ++q;}
+    while (q <= b->e) {
+        ch = *q++;
+        if (ch == '\n' || x == w - 1) {
+            if (y == h - 3) break;
+            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            ++y;
+            x = 0;
+        } else {
+            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            ++x;
+        }
+    }
+
+draw_cl:
+    move_cursor(y = h - 1, x = 0);
+    CLEAR_LINE();
+    q = cl->a + cl->d;
+    while (q != cl->g) {
+        ch = *q++;
+        if (ch == '\n' || x == w - 1) {
+                /* centre_cursor(cl, 1, w); */
+                goto draw_cl;
+        } else {
+            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            ++x;
+        }
+    }
+    if (cla) {
+        cy = y;
+        cx = x;
+    }
+    q = cl->c;
+    while (q <= cl->e) {
+        ch = *q++;
+        if (ch == '\n' || x == w - 1) {
+            break;
+        } else {
+            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            ++x;
+        }
+    }
+
+    move_cursor(h - 2, 0);
+    printf("%.*s", w, b->fn);
+
+    move_cursor(cy, cx);
     return 0;
 }
 
