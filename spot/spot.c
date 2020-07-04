@@ -263,66 +263,74 @@ void centre_cursor(struct buffer *b, int h, int w)
     b->d = q - b->a;
 }
 
-int draw_screen(struct buffer *b, struct buffer *cl, int cla)
+int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
+    char *ns, int sa, int *cy, int *cx)
 {
-    int h, w, y, x, cy, cx;
+    int y, x;
     size_t ci = b->g - b->a; /* Cursor index */
     char *q, ch;
-    if (get_screen_size(&h, &w)) return 1;
+    size_t v;                /* Virtual screen index */
+    size_t len;
     if (h < 3 || w < 1) return 1;
     if (ci < b->d) centre_cursor(b, h - 2, w);
 draw_text:
-    CLEAR_SCREEN();
-    move_cursor(y = 0, x = 0); /* Top left corner */
+    v = 0;
+    y = 0;
+    x = 0;
     q = b->a + b->d;
     while (q != b->g) {
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
             if (y == h - 3) {
                 centre_cursor(b, h - 2, w);
+                memset(ns, ' ', sa);
                 goto draw_text;
             }
-            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            if (ch == '\n') v = (v / w + 1) * w;
+            else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++y;
             x = 0;
         } else {
-            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++x;
         }
     }
-    cy = y;
-    cx = x;
+    *cy = y;
+    *cx = x;
     q = b->c;
     while (q <= b->e) {
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
             if (y == h - 3) break;
-            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            if (ch == '\n') v = (v / w + 1) * w;
+            else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++y;
             x = 0;
         } else {
-            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++x;
         }
     }
 
 draw_cl:
-    move_cursor(y = h - 1, x = 0);
-    CLEAR_LINE();
+    v = sa - w;
+    y = h - 1;
+    x = 0;
     q = cl->a + cl->d;
     while (q != cl->g) {
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
                 centre_cursor(cl, 1, w);
+                memset(ns + sa - w, ' ', w);
                 goto draw_cl;
         } else {
-            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++x;
         }
     }
     if (cla) {
-        cy = y;
-        cx = x;
+        *cy = y;
+        *cx = x;
     }
     q = cl->c;
     while (q <= cl->e) {
@@ -330,25 +338,42 @@ draw_cl:
         if (ch == '\n' || x == w - 1) {
             break;
         } else {
-            putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++x;
         }
     }
 
-    move_cursor(h - 2, 0);
-    printf("%.*s", w, b->fn);
+    v = sa - w * 2;
+    if (b->fn != NULL) {
+        len = strlen(b->fn);
+        memcpy(ns + v, b->fn, len < w ? len : w);
+    } else {
+        memcpy(ns + v, "NULL", 4);
+    }
 
-    move_cursor(cy, cx);
     return 0;
+}
+
+int diff_draw(char *ns, char *cs, int sa, int w)
+{
+    size_t v;
+    char ch;
+    for (v = 0; v < sa; ++v) {
+        if ((ch = *(ns + v)) != *(cs + v)) {
+            move_cursor(v / w, v - (v / w) * w);
+            putchar(ch);
+        }
+    }
 }
 
 void test_print_buffer(struct buffer *b)
 {
     char *q = b->a, ch;
-    printf("gi = %zu, ci = %zu, ei = %zu\n", (size_t) (b->g - b->a), (size_t) (b->c - b->a), (size_t) (b->e - b->a));
+    printf("gi = %zu, ci = %zu, ei = %zu\n", (size_t) (b->g - b->a),
+        (size_t) (b->c - b->a), (size_t) (b->e - b->a));
     while (q != b->g) {
         ch = *q++;
-        putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+        putchar(isgraph(ch) || ch == ' ' || ch == '\n' ? ch : '?');
     }
     while (q != b->c) {
         ch = *q++;
@@ -356,23 +381,26 @@ void test_print_buffer(struct buffer *b)
     }
     while (q <= b->e) {
         ch = *q++;
-        putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+        putchar(isgraph(ch) || ch == ' ' || ch == '\n' ? ch : '?');
     }
     putchar('\n');
 }
 
 int main(int argc, char **argv)
 {
-    int ret = 0;
+    int ret = 0, running = 1, x, h, w, cy, cx;
     struct buffer **z; /* The text buffers */
     size_t zs;         /* Number of text buffers */
     size_t za = 0;     /* The index of the active text buffer */
     struct buffer *cl; /* Command line buffer */
     int cla = 0;       /* Command line buffer is active */
+    char *ns = NULL;   /* Next screen (virtual) */
+    char *cs = NULL;   /* Current screen (virtual) */
+    size_t ss = 0;     /* Screen size (virtual) */
+    size_t sa;         /* Terminal screen area (real) */
+    char *t;
     size_t i;
     struct _stat64 st;
-    int running = 1;
-    int x;
     if (argc > SIZE_MAX) return 1;
     if (argc > 1) {
         zs = argc - 1;
@@ -400,8 +428,33 @@ int main(int argc, char **argv)
     setup_graphics();
 #endif
 
+
+
     while (running) {
-        draw_screen(*(z + za), cl, cla);
+        if (get_screen_size(&h, &w)) QUIT(1);
+        if (h < 1 || w < 1) QUIT(1);
+        if (h > INT_MAX / w) QUIT(1);
+        sa = h * w;
+        if (ss < sa) {
+            if ((t = realloc(ns, sa)) == NULL) QUIT(1);
+            ns = t;
+            if ((t = realloc(cs, sa)) == NULL) QUIT(1);
+            cs = t;
+            ss = sa;
+            memset(ns, ' ', ss);
+            memset(cs, ' ', ss);
+            CLEAR_SCREEN();
+        } else {
+            memset(ns, ' ', sa);
+        }
+
+        draw_screen(*(z + za), cl, cla, h, w, ns, sa, &cy, &cx);
+        diff_draw(ns, cs, sa, w);
+        move_cursor(cy, cx);
+        t = cs;
+        cs = ns;
+        ns = t;
+
         x = _getch();
         insert_char(*(z + za), x, 1);
         if (x == 'q') running = 0;
