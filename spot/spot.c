@@ -397,7 +397,8 @@ int main(int argc, char **argv)
     char *ns = NULL;   /* Next screen (virtual) */
     char *cs = NULL;   /* Current screen (virtual) */
     size_t ss = 0;     /* Screen size (virtual) */
-    size_t sa;         /* Terminal screen area (real) */
+    size_t sa = 0;     /* Terminal screen area (real) */
+    size_t c_sa;       /* Current terminal screen area (real) */
     char *t;
     size_t i;
     struct _stat64 st;
@@ -428,19 +429,20 @@ int main(int argc, char **argv)
     setup_graphics();
 #endif
 
-
-
     while (running) {
         if (get_screen_size(&h, &w)) QUIT(1);
         if (h < 1 || w < 1) QUIT(1);
         if (h > INT_MAX / w) QUIT(1);
-        sa = h * w;
-        if (ss < sa) {
-            if ((t = realloc(ns, sa)) == NULL) QUIT(1);
-            ns = t;
-            if ((t = realloc(cs, sa)) == NULL) QUIT(1);
-            cs = t;
-            ss = sa;
+        c_sa = h * w;
+        if (c_sa != sa) {
+            sa = c_sa;
+            if (ss < sa) {
+                if ((t = realloc(ns, sa)) == NULL) QUIT(1);
+                ns = t;
+                if ((t = realloc(cs, sa)) == NULL) QUIT(1);
+                cs = t;
+                ss = sa;
+            }
             memset(ns, ' ', ss);
             memset(cs, ' ', ss);
             CLEAR_SCREEN();
