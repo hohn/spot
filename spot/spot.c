@@ -23,6 +23,7 @@
 
 #ifdef _WIN32
     #include <windows.h>
+    #include <conio.h>
 #endif
 
 #include <stdint.h>
@@ -143,12 +144,12 @@ int insert_file(struct buffer *b, char *fn)
     fs = (size_t) st.st_size;
     if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
     if ((fp = fopen(fn, "rb")) == NULL) return 1;
-    if (fread(b->g, 1, fs, fp) != fs) {
+    if (fread(b->c - fs, 1, fs, fp) != fs) {
         fclose(fp);
         return 1;
     }
     if (fclose(fp)) return 1;
-    b->g += fs;
+    b->c -= fs;
     return 0;
 }
 
@@ -234,28 +235,33 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
-#define MOVE_CURSOR(y, x)
-
 void move_cursor(int y, int x)
 {
-    printf("\033[%d;%dH", y, x);
+    /* Top left corner is (1, 1) not (0, 0) so need to add one */
+    printf("\033[%d;%dH", y + 1, x + 1);
 }
 
-/*
 void centre_cursor(struct buffer *b, int h, int w)
 {
-    char *q;
-    size_t line_count = 1;
+    char *q, ch;
+    int up = h / 2 + 1;
+    size_t horiz = 1; /* Cursor counted */
     if (b->g == b->a) {
         b->d = 0;
         return;
     }
     q = b->g - 1;
-    while (1) {
-        if (
+    while (up && q >= b->a) {
+        ch = *q++;
+        ++horiz;
+        if (ch == '\n' || horiz == w) {
+            horiz = 0;
+            --up;
+        }
     }
+    if (q != b->a) ++q;
+    b->d = q - b->a;
 }
-*/
 
 int draw_screen(struct buffer *b, struct buffer *cl, int cla)
 {
@@ -264,16 +270,16 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla)
     char *q, ch;
     if (get_screen_size(&h, &w)) return 1;
     if (h < 3 || w < 1) return 1;
-    /* if (ci < b->d) centre_cursor(b); */
+    if (ci < b->d) centre_cursor(b, h - 2, w);
 draw_text:
     CLEAR_SCREEN();
-    move_cursor(y = 0, x = 0);
+    move_cursor(y = 0, x = 0); /* Top left corner */
     q = b->a + b->d;
     while (q != b->g) {
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
             if (y == h - 3) {
-                /* centre_cursor(b, h - 2, w); */
+                centre_cursor(b, h - 2, w);
                 goto draw_text;
             }
             putchar(isgraph(ch) || ch == '\n' ? ch : '?');
@@ -307,7 +313,7 @@ draw_cl:
     while (q != cl->g) {
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
-                /* centre_cursor(cl, 1, w); */
+                centre_cursor(cl, 1, w);
                 goto draw_cl;
         } else {
             putchar(isgraph(ch) || ch == '\n' ? ch : '?');
@@ -334,6 +340,25 @@ draw_cl:
 
     move_cursor(cy, cx);
     return 0;
+}
+
+void test_print_buffer(struct buffer *b)
+{
+    char *q = b->a, ch;
+    printf("gi = %zu, ci = %zu, ei = %zu\n", (size_t) (b->g - b->a), (size_t) (b->c - b->a), (size_t) (b->e - b->a));
+    while (q != b->g) {
+        ch = *q++;
+        putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+    }
+    while (q != b->c) {
+        ch = *q++;
+        putchar('X');
+    }
+    while (q <= b->e) {
+        ch = *q++;
+        putchar(isgraph(ch) || ch == '\n' ? ch : '?');
+    }
+    putchar('\n');
 }
 
 int main(int argc, char **argv)
@@ -377,15 +402,15 @@ int main(int argc, char **argv)
 
     while (running) {
         draw_screen(*(z + za), cl, cla);
-        x = getchar();
-
+        x = _getch();
+        insert_char(*(z + za), x, 1);
         if (x == 'q') running = 0;
-
     }
 
 clean_up:
+    CLEAR_SCREEN();
 
-if (ret) printf("FAIL\n");
+    if (ret) printf("FAIL\n");
 
     return ret;
 }
