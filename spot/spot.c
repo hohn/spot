@@ -69,22 +69,24 @@ int move_right(struct buffer *b, size_t mult)
 
 int grow_gap(struct buffer *b, size_t req)
 {
-    size_t target_gap, current_gap, increase, current_size, target_size;
-    char *old_a = b->a, *t;
+    size_t req_increase, current_size, target_size, increase;
+    char *t, *tc;
     if (req > SIZE_MAX - GAP) return 1;
-    target_gap = req + GAP;
-    current_gap = b->c - b->g;
-    increase = target_gap - current_gap;
+    /* Only call grow_gap if req > (b->c - b->g) */
+    req_increase = req + GAP - (b->c - b->g);
     current_size = b->e - b->a + 1;
+    increase = current_size > req_increase ? current_size : req_increase;
+    if (current_size > SIZE_MAX - increase) return 1;
     target_size = current_size + increase;
-    if ((t = realloc(b->a, target_size)) == NULL) return 1;
+    if ((t = malloc(target_size)) == NULL) return 1;
+    memcpy(t, b->a, b->g - b->a);
+    tc = t + (b->c - b->a) + increase;
+    memcpy(tc, b->c, b->e - b->c + 1);
+    b->g = t + (b->g - b->a);
+    b->c = tc;
+    b->e = t + target_size - 1;
+    free(b->a);
     b->a = t;
-    b->g = b->g - old_a + b->a;
-    b->c = b->c - old_a + b->a;
-    b->e = b->e - old_a + b->a;
-    memmove(b->c + increase, b->c, b->e - b->c + 1);
-    b->c += increase;
-    b->e += increase;
     return 0;
 }
 
