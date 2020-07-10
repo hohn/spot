@@ -237,44 +237,20 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
-void move_cursor(int y, int x)
-{
-    /* Top left corner is (1, 1) not (0, 0) so need to add one */
-    printf("\033[%d;%dH", y + 1, x + 1);
-}
-
-void centre_cursor(struct buffer *b, int h, int w)
-{
-    char *q, ch;
-    int up = h / 2 + 1;
-    size_t horiz = 1; /* Cursor counted */
-    if (b->g == b->a) {
-        b->d = 0;
-        return;
-    }
-    q = b->g - 1;
-    while (up && q >= b->a) {
-        ch = *q++;
-        ++horiz;
-        if (ch == '\n' || horiz == w) {
-            horiz = 0;
-            --up;
-        }
-    }
-    if (q != b->a) ++q;
-    b->d = q - b->a;
-}
-
 int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
     char *ns, int sa, int *cy, int *cx)
 {
+    /* Virtually draw screen */
     int y, x;
-    size_t ci = b->g - b->a; /* Cursor index */
+    size_t ci = b->g - b->a;      /* Text buffer cursor index */
+    int ta = (h - 2) * w;         /* Text buffer screen area */
+    size_t cl_ci = cl->g - cl->a; /* Command line buffer cursor index */
     char *q, ch;
-    size_t v;                /* Virtual screen index */
+    size_t v;                     /* Virtual screen index */
     size_t len;
-    if (h < 3 || w < 1) return 1;
-    if (ci < b->d) centre_cursor(b, h - 2, w);
+
+    /* Text buffer */
+    if (ci < b->d || ci - b->d >= ta) b->d = ci;
 draw_text:
     v = 0;
     y = 0;
@@ -284,8 +260,8 @@ draw_text:
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
             if (y == h - 3) {
-                centre_cursor(b, h - 2, w);
-                memset(ns, ' ', sa);
+                b->d = ci;
+                memset(ns, ' ', ta);
                 goto draw_text;
             }
             if (ch == '\n') v = (v / w + 1) * w;
@@ -314,6 +290,8 @@ draw_text:
         }
     }
 
+    /* Command line buffer */
+    if (cl_ci < cl->d || cl_ci - cl->d >= w) cl->d = cl_ci;
 draw_cl:
     v = sa - w;
     y = h - 1;
@@ -322,7 +300,7 @@ draw_cl:
     while (q != cl->g) {
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
-                centre_cursor(cl, 1, w);
+                cl->d = cl_ci;
                 memset(ns + sa - w, ' ', w);
                 goto draw_cl;
         } else {
@@ -345,6 +323,7 @@ draw_cl:
         }
     }
 
+    /* Status bar */
     v = sa - w * 2;
     if (b->fn != NULL) {
         len = strlen(b->fn);
@@ -358,11 +337,13 @@ draw_cl:
 
 int diff_draw(char *ns, char *cs, int sa, int w)
 {
-    size_t v;
+    /* Physically draw the screen where the virtual screens differ */
+    int v;
     char ch;
     for (v = 0; v < sa; ++v) {
         if ((ch = *(ns + v)) != *(cs + v)) {
-            move_cursor(v / w, v - (v / w) * w);
+            /* Move cursor: top left corner is (1, 1) not (0, 0) so need to add one */
+            printf("\033[%d;%dH", v / w + 1, v - (v / w) * w + 1);
             putchar(ch);
         }
     }
@@ -433,31 +414,38 @@ int main(int argc, char **argv)
 
     while (running) {
         if (get_screen_size(&h, &w)) QUIT(1);
-        if (h < 1 || w < 1) QUIT(1);
-        if (h > INT_MAX / w) QUIT(1);
-        c_sa = h * w;
-        if (c_sa != sa) {
-            sa = c_sa;
-            if (ss < sa) {
-                if ((t = realloc(ns, sa)) == NULL) QUIT(1);
-                ns = t;
-                if ((t = realloc(cs, sa)) == NULL) QUIT(1);
-                cs = t;
-                ss = sa;
-            }
-            memset(ns, ' ', ss);
-            memset(cs, ' ', ss);
-            CLEAR_SCREEN();
-        } else {
-            memset(ns, ' ', sa);
-        }
 
-        draw_screen(*(z + za), cl, cla, h, w, ns, sa, &cy, &cx);
-        diff_draw(ns, cs, sa, w);
-        move_cursor(cy, cx);
-        t = cs;
-        cs = ns;
-        ns = t;
+        /* Do graphics only if screen is big enough */
+        if (h >= 3 && w >= 1) {
+            if (h > INT_MAX / w) QUIT(1);
+            c_sa = h * w;
+            if (c_sa != sa) {
+                sa = c_sa;
+                /* Bigger screen */
+                if (ss < sa) {
+                    free(ns);
+                    free(cs);
+                    if ((t = malloc(sa)) == NULL) QUIT(1);
+                    ns = t;
+                    if ((t = malloc(sa)) == NULL) QUIT(1);
+                    cs = t;
+                    ss = sa;
+                }
+                memset(ns, ' ', ss);
+                memset(cs, ' ', ss);
+                CLEAR_SCREEN();
+            } else {
+                memset(ns, ' ', sa);
+            }
+
+            draw_screen(*(z + za), cl, cla, h, w, ns, sa, &cy, &cx);
+            diff_draw(ns, cs, sa, w);
+            printf("\033[%d;%dH", cy + 1, cx + 1);
+            /* Swap screens */
+            t = cs;
+            cs = ns;
+            ns = t;
+        }
 
         x = _getch();
         insert_char(*(z + za), x, 1);
