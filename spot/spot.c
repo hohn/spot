@@ -404,7 +404,7 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
         /* Truncate filename if screen is not wide enough */
         len = len < w ? len : w;
         /* Print file name in status bar */
-        for (j = 0; j < len; ++j) *(ns + v++) = *(b->fn + j++);
+        for (j = 0; j < len; ++j) *(ns + v++) = *(b->fn + j);
     }
     /* Complete status bar with spaces */
     while (v / w != h - 1) *(ns + v++) = ' ';
