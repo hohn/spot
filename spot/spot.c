@@ -358,97 +358,84 @@ void reverse_scan(struct buffer *b, int th, int w, int centre)
 int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
     char *ns, int sa, int *cy, int *cx)
 {
-    /* Virtually draw screen */
-    int y, x;
-    size_t ci = b->g - b->a;      /* Text buffer cursor index */
-    int ta = (h - 2) * w;         /* Text buffer screen area */
-    size_t cl_ci = cl->g - cl->a; /* Command line buffer cursor index */
+    /* Virtually draw screen (and clear unused sections on the go) */
     char *q, ch;
-    size_t v;                     /* Virtual screen index */
-    size_t len;
+    size_t v;    /* Virtual screen index */
+    size_t j;    /* Filename character index */
+    size_t len;  /* Used for printing the filename */
 
     /* Text buffer */
     reverse_scan(b, h - 2, w, 0);
     v = 0;
-    y = 0;
-    x = 0;
     q = b->a + b->d;
+    /* Print before the gap */
     while (q != b->g) {
         ch = *q++;
-        if (ch == '\n' || x == w - 1) {
-            if (y == h - 3) {
-                return 1; /* reverse_scan will prevent this from happening */
-            }
-            if (ch == '\n') v = (v / w + 1) * w;
-            else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
-            ++y;
-            x = 0;
-        } else {
-            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
-            ++x;
-        }
+        /*
+         * When a newline character is encountered, complete the screen
+         * line with spaces. The modulus will be zero at the start of
+         * the next screen line. The "do" makes it work when the '\n'
+         * is the first character on a screen line.
+         */
+        if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
+        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
     }
-    *cy = y;
-    *cx = x;
+    /* Record cursor's screen location */
+    *cy = v / w;
+    *cx = v % w;
     q = b->c;
+    /* Print after the gap */
     while (1) {
         ch = *q;
-        if (ch == '\n' || x == w - 1) {
-            if (y == h - 3) break;
-            if (ch == '\n') v = (v / w + 1) * w;
-            else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
-            ++y;
-            x = 0;
-        } else {
-            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
-            ++x;
-        }
+        if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
+        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
+        /* Stop if have reached the status bar, before printing there */
+        if (v / w == h - 2) break;
         /* To avoid incrementing pointer outside of memory allocation */
         if (q == b->e) break;
         ++q;
     }
+    /* Fill in unused text region with spaces */
+    while (v / w != h - 2) *(ns + v++) = ' ';
+
+    /* Status bar */
+    if (b->fn != NULL) {
+        len = strlen(b->fn);
+        /* Truncate filename if screen is not wide enough */
+        len = len < w ? len : w;
+        /* Print file name in status bar */
+        for (j = 0; j < len; ++j) *(ns + v++) = *(b->fn + j++);
+    }
+    /* Complete status bar with spaces */
+    while (v / w != h - 1) *(ns + v++) = ' ';
 
     /* Command line buffer */
     reverse_scan(cl, 1, w, 0);
-    v = sa - w;
-    y = h - 1;
-    x = 0;
     q = cl->a + cl->d;
+    /* Print before the gap */
     while (q != cl->g) {
         ch = *q++;
-        if (ch == '\n' || x == w - 1) {
-            return 1; /* reverse_scan will prevent this from happening */
-        } else {
-            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
-            ++x;
-        }
+        if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
+        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
     }
+    /* If the command line is active, record cursor's screen location */
     if (cla) {
-        *cy = y;
-        *cx = x;
+        *cy = v / w;
+        *cx = v % w;
     }
     q = cl->c;
+    /* Print after the gap */
     while (1) {
         ch = *q;
-        if (ch == '\n' || x == w - 1) {
-            break;
-        } else {
-            *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
-            ++x;
-        }
-        /* To avoid incrementing pointer outside of memory allocation */
+        if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
+        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
+        /* Stop if off the bottom of the screen, before printing there */
+        if (v / w == h) break;
         if (q == cl->e) break;
         ++q;
     }
-
-    /* Status bar */
-    v = sa - w * 2;
-    if (b->fn != NULL) {
-        len = strlen(b->fn);
-        memcpy(ns + v, b->fn, len < w ? len : w);
-    } else {
-        memcpy(ns + v, "NULL", 4);
-    }
+    /* Fill in unused text region with spaces */
+    while (v / w != h) *(ns + v++) = ' ';
 
     return 0;
 }
@@ -537,6 +524,7 @@ int main(int argc, char **argv)
         if (h >= 3 && w >= 1) {
             if (h > INT_MAX / w) QUIT(1);
             c_sa = h * w;
+            /* Change in screen size */
             if (c_sa != sa) {
                 sa = c_sa;
                 /* Bigger screen */
@@ -549,17 +537,19 @@ int main(int argc, char **argv)
                     cs = t;
                     ss = sa;
                 }
-                memset(ns, ' ', ss);
+                /*
+                 * Clear the virtual current screen and the physical screen.
+                 * There is no need to clear the virtual next screen, as it
+                 * clears during printing.
+                 */
                 memset(cs, ' ', ss);
                 CLEAR_SCREEN();
-            } else {
-                memset(ns, ' ', sa);
             }
 
             draw_screen(*(z + za), cl, cla, h, w, ns, sa, &cy, &cx);
             diff_draw(ns, cs, sa, w);
             printf("\033[%d;%dH", cy + 1, cx + 1);
-            /* Swap screens */
+            /* Swap virtual screens */
             t = cs;
             cs = ns;
             ns = t;
