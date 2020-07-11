@@ -237,6 +237,124 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
+void reverse_scan(struct buffer *b, int th, int w, int centre)
+{
+    /*
+     * This is the most complicated function in the text editor.
+     * It does a reverse scan to see if the cursor would be on the screen.
+     * If the cursor would be off the screen, or if the user requested to
+     * centre, then draw start will be set so that the cursor will end up
+     * on the middle line.
+     */
+
+    size_t ci = b->g - b->a;       /* Cursor index */
+    int ta = th * w;               /* Text screen area */
+    int hth = th > 2 ? th / 2 : 1; /* Half the text screen height */
+    int hta = hth * w;             /* Half the text screen area */
+    int target_h;                  /* The height to stop scanning */
+    int height_count = 0;          /* Keeping track of the height while scanning */
+    /*
+     * Keeping track of the width while scanning.
+     * Start from one to count the cursor.
+     */
+    int width_count = 1;
+    char *q;                       /* Pointer used for the reverse scan */
+    char *q_stop;                  /* Pointer where the reverse scan is to stop (inclusive) */
+    char *q_d = b->a + b->d;       /* Current draw start pointer */
+    /*
+     * Pointer to the draw start postion that results in the cursor being centred.
+     * Only used when centreing is not planned.
+     */
+    char *q_centre;
+
+    /*
+     * If the cursor is at the start of the buffer, then must
+     * draw start from the start of the buffer.
+     */
+    if (b->g == b->a) {
+        b->d = 0;
+        return;
+    }
+
+     /*
+      * Test to see if cursor is definitely on screen.
+      * If the user has not requested to centre, then no action is required.
+      */
+     if (ci >= b->d && ci - b->d < th && !centre) return;
+
+     /*
+      * Test to see if cursor is definitely off the screen.
+      * In this case we must centre.
+      */
+     if (ci < b->d || ci - b->d >= ta) centre = 1;
+
+    /*
+     * Set the stopping postion to limit the reverse scan as much as possible,
+     * and to reduce the number of checks that must be done each loop iteration.
+     */
+    if (centre) {
+        /*
+         * Make sure we don't over shoot the start of the buffer.
+         * Minus one to account for the cursor.
+         */
+        if (ci < hta - 1) q_stop = b->a;
+        else q_stop = b->g - (hta - 1);
+        target_h = hth;
+    } else {
+        if (ci < ta - 1) q_stop = b->a;
+        else q_stop = b->g - (ta - 1);
+        /* Don't go past current draw start */
+        if (q_stop < q_d) q_stop = q_d;
+        target_h = th;
+    }
+
+    /* Process cursor if the screen is one wide */
+    if (w == 1) {
+        width_count = 0;
+        ++height_count;
+        /* If the text area is one by one, then draw from the cursor */
+        if (target_h == 1) {
+            b->d = ci;
+            return;
+        }
+    }
+
+    q = b->g - 1; /* Start from the character to the left of the gap */
+
+    while (1) {
+        /*
+         * Process char:
+         * Test for full line and test if the target height has been reached.
+         */
+        if (*q == '\n' || ++width_count > w) {
+            width_count = 0;
+            ++height_count;
+            /* Record draw start position for centreing */
+            if (height_count == hth) {
+                q_centre = q;
+                /* Increase if stopped on a new line character */
+                if (*q_centre == '\n') ++q_centre;
+            }
+            /*
+             * Stop when target height has been reached.
+             * This is to prevent unnecessary scanning.
+             * In this sitution q_centre will be used.
+             */
+            if (height_count == target_h) {
+                q = q_centre;
+                break;
+            }
+        }
+
+        /* To avoid decrementing to in front of memory allocation */
+        if (q == q_stop) break;
+        --q;
+    }
+
+    /* Set draw start */
+    b->d = q - b->a;
+}
+
 int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
     char *ns, int sa, int *cy, int *cx)
 {
@@ -250,8 +368,7 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
     size_t len;
 
     /* Text buffer */
-    if (ci < b->d || ci - b->d >= ta) b->d = ci;
-draw_text:
+    reverse_scan(b, h - 2, w, 0);
     v = 0;
     y = 0;
     x = 0;
@@ -260,9 +377,7 @@ draw_text:
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
             if (y == h - 3) {
-                b->d = ci;
-                memset(ns, ' ', ta);
-                goto draw_text;
+                return 1; /* reverse_scan will prevent this from happening */
             }
             if (ch == '\n') v = (v / w + 1) * w;
             else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
@@ -276,8 +391,8 @@ draw_text:
     *cy = y;
     *cx = x;
     q = b->c;
-    while (q <= b->e) {
-        ch = *q++;
+    while (1) {
+        ch = *q;
         if (ch == '\n' || x == w - 1) {
             if (y == h - 3) break;
             if (ch == '\n') v = (v / w + 1) * w;
@@ -288,11 +403,13 @@ draw_text:
             *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++x;
         }
+        /* To avoid incrementing pointer outside of memory allocation */
+        if (q == b->e) break;
+        ++q;
     }
 
     /* Command line buffer */
-    if (cl_ci < cl->d || cl_ci - cl->d >= w) cl->d = cl_ci;
-draw_cl:
+    reverse_scan(cl, 1, w, 0);
     v = sa - w;
     y = h - 1;
     x = 0;
@@ -300,9 +417,7 @@ draw_cl:
     while (q != cl->g) {
         ch = *q++;
         if (ch == '\n' || x == w - 1) {
-                cl->d = cl_ci;
-                memset(ns + sa - w, ' ', w);
-                goto draw_cl;
+            return 1; /* reverse_scan will prevent this from happening */
         } else {
             *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++x;
@@ -313,14 +428,17 @@ draw_cl:
         *cx = x;
     }
     q = cl->c;
-    while (q <= cl->e) {
-        ch = *q++;
+    while (1) {
+        ch = *q;
         if (ch == '\n' || x == w - 1) {
             break;
         } else {
             *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
             ++x;
         }
+        /* To avoid incrementing pointer outside of memory allocation */
+        if (q == cl->e) break;
+        ++q;
     }
 
     /* Status bar */
@@ -335,7 +453,7 @@ draw_cl:
     return 0;
 }
 
-int diff_draw(char *ns, char *cs, int sa, int w)
+void diff_draw(char *ns, char *cs, int sa, int w)
 {
     /* Physically draw the screen where the virtual screens differ */
     int v;
