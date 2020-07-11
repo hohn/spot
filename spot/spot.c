@@ -443,13 +443,19 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
 void diff_draw(char *ns, char *cs, int sa, int w)
 {
     /* Physically draw the screen where the virtual screens differ */
-    int v;
+    int v;          /* Index */
+    int in_pos = 0; /* If in position for printing (no move is required) */
     char ch;
     for (v = 0; v < sa; ++v) {
         if ((ch = *(ns + v)) != *(cs + v)) {
-            /* Move cursor: top left corner is (1, 1) not (0, 0) so need to add one */
-            printf("\033[%d;%dH", v / w + 1, v - (v / w) * w + 1);
+            if (!in_pos) {
+                /* Move cursor: top left corner is (1, 1) not (0, 0) so need to add one */
+                printf("\033[%d;%dH", v / w + 1, v - (v / w) * w + 1);
+                in_pos = 1;
+            }
             putchar(ch);
+        } else {
+            in_pos = 0;
         }
     }
 }
