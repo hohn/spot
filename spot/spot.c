@@ -31,13 +31,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * The default gap size. Must be at least 1.
+ * It is good to set small while testing, but BUFSIZ is a sensible
+ * choice for real use (to limit the expense of growing the gap).
+ */
 #define GAP 2
 
+/* ANSI escape sequences */
 #define CLEAR_SCREEN() printf("\033[2J")
 #define CLEAR_LINE() printf("\033[2K")
 
+/*
+ * Sets the return value for the text editor and jumps to the clean up.
+ * Only use in main().
+ */
 #define QUIT(r) do {ret = r; goto clean_up;} while (0)
 
+/* Gap buffer structure */
 struct buffer {
     char *fn;  /* Filename where the buffer will save to */
     char *a;   /* Start of buffer */
@@ -51,6 +62,11 @@ struct buffer {
 
 int move_left(struct buffer *b, size_t mult)
 {
+    /*
+     * Moves the cursor left mult positions.
+     * Text before the old gap is copied into the right-hand side
+     * of the old gap.
+     */
     if (mult > (size_t) (b->g - b->a)) return 1;
     memmove(b->c - mult, b->g - mult, mult);
     b->g -= mult;
@@ -60,6 +76,11 @@ int move_left(struct buffer *b, size_t mult)
 
 int move_right(struct buffer *b, size_t mult)
 {
+    /*
+     * Moves the cursor right mult positions.
+     * Text after the old gap is copied into the left-hand side
+     * of the old gap.
+     */
     if (mult > (size_t) (b->e - b->c)) return 1;
     memmove(b->g, b->c, mult);
     b->g += mult;
@@ -69,6 +90,17 @@ int move_right(struct buffer *b, size_t mult)
 
 int grow_gap(struct buffer *b, size_t req)
 {
+    /*
+     * Increases the gap (and the buffer).
+     * This is only called when an insert is planned with a size greater than
+     * the current gap size. It is OK for the gap to stay zero, so long as an
+     * insert is not planned. The gap is increased the maximum of a linear
+     * assessment and an exponential assessment. In the linear assessment,
+     * the gap is grown enough, so that the resultant gap can fit the
+     * planned insert plus the default GAP (this is to avoid needing another
+     * grow gap soon afterwards). The exponential assessment is simply doubling
+     * the whole buffer (protects against repeated inserts).
+     */
     size_t req_increase, current_size, target_size, increase;
     char *t, *tc;
     if (req > SIZE_MAX - GAP) return 1;
