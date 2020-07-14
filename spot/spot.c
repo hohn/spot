@@ -105,7 +105,7 @@ int grow_gap(struct buffer *b, size_t req)
      * insert is not planned. The gap is increased so that the resultant gap
      * can fit the planned insert plus the default GAP (to avoid having to
      * grow the gap again soon afterwards), or so that the whole buffer is
-     * doubled (to protect against repeated inserts), which ever is larger.
+     * doubled (to protect against repeated inserts), whichever is larger.
      */
     size_t req_increase, current_size, target_size, increase;
     char *t, *tc;
@@ -419,12 +419,14 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
 {
     /* Virtually draw screen (and clear unused sections on the go) */
     char *q, ch;
-    size_t v;    /* Virtual screen index */
-    size_t j;    /* Filename character index */
-    size_t len;  /* Used for printing the filename */
+    size_t v;   /* Virtual screen index */
+    size_t j;   /* Filename character index */
+    size_t len; /* Used for printing the filename */
+    /* Height of text buffer portion of the screen */
+    int th = h > 2 ? h - 2 : 1;
 
     /* Text buffer */
-    reverse_scan(b, h - 2, w, 0);
+    reverse_scan(b, th, w, 0);
     v = 0;
     q = b->a + b->d;
     /* Print before the gap */
@@ -449,13 +451,16 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
         if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
         else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
         /* Stop if have reached the status bar, before printing there */
-        if (v / w == h - 2) break;
+        if (v / w == th) break;
         /* To avoid incrementing pointer outside of memory allocation */
         if (q == b->e) break;
         ++q;
     }
     /* Fill in unused text region with spaces */
-    while (v / w != h - 2) *(ns + v++) = ' ';
+    while (v / w != th) *(ns + v++) = ' ';
+
+    /* Stop if screen is only one row high */
+    if (h == 1) return 0;
 
     /* Status bar */
     if (b->fn != NULL) {
@@ -467,6 +472,9 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
     }
     /* Complete status bar with spaces */
     while (v / w != h - 1) *(ns + v++) = ' ';
+
+    /* Stop if screen is only two rows high */
+    if (h == 2) return 0;
 
     /* Command line buffer */
     reverse_scan(cl, 1, w, 0);
@@ -593,7 +601,7 @@ int main(int argc, char **argv)
         if (get_screen_size(&h, &w)) QUIT(1);
 
         /* Do graphics only if screen is big enough */
-        if (h >= 3 && w >= 1) {
+        if (h >= 1 && w >= 1) {
             if (h > INT_MAX / w) QUIT(1);
             c_sa = h * w;
             /* Change in screen size */
