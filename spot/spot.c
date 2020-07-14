@@ -33,10 +33,16 @@
 
 /*
  * The default gap size. Must be at least 1.
- * It is good to set small while testing, but BUFSIZ is a sensible
- * choice for real use (to limit the expense of growing the gap).
+ * It is good to set small while testing, but BUFSIZ is a sensible choice for
+ * real use (to limit the expense of growing the gap).
  */
 #define GAP 2
+
+/*
+ * End Of Buffer CHaracter. This cannot be deleted, but will not be written to
+ * file.
+ */
+#define EOBCH '~'
 
 /* ANSI escape sequences */
 #define CLEAR_SCREEN() printf("\033[2J")
@@ -48,7 +54,10 @@
  */
 #define QUIT(r) do {ret = r; goto clean_up;} while (0)
 
-/* Gap buffer structure */
+/*
+ * Gap buffer structure.
+ * The cursor is always to the immediate right of the gap.
+ */
 struct buffer {
     char *fn;  /* Filename where the buffer will save to */
     char *a;   /* Start of buffer */
@@ -64,8 +73,8 @@ int move_left(struct buffer *b, size_t mult)
 {
     /*
      * Moves the cursor left mult positions.
-     * Text before the old gap is copied into the right-hand side
-     * of the old gap.
+     * Text before the old gap is copied into the right-hand side of the old
+     * gap.
      */
     if (mult > (size_t) (b->g - b->a)) return 1;
     memmove(b->c - mult, b->g - mult, mult);
@@ -78,8 +87,7 @@ int move_right(struct buffer *b, size_t mult)
 {
     /*
      * Moves the cursor right mult positions.
-     * Text after the old gap is copied into the left-hand side
-     * of the old gap.
+     * Text after the old gap is copied into the left-hand side of the old gap.
      */
     if (mult > (size_t) (b->e - b->c)) return 1;
     memmove(b->g, b->c, mult);
@@ -91,15 +99,13 @@ int move_right(struct buffer *b, size_t mult)
 int grow_gap(struct buffer *b, size_t req)
 {
     /*
-     * Increases the gap (and the buffer).
-     * This is only called when an insert is planned with a size greater than
-     * the current gap size. It is OK for the gap to stay zero, so long as an
-     * insert is not planned. The gap is increased the maximum of a linear
-     * assessment and an exponential assessment. In the linear assessment,
-     * the gap is grown enough, so that the resultant gap can fit the
-     * planned insert plus the default GAP (this is to avoid needing another
-     * grow gap soon afterwards). The exponential assessment is simply doubling
-     * the whole buffer (protects against repeated inserts).
+     * Increases the gap.
+     * Only called when an insert is planned with a size greater than the
+     * current gap size. It is OK for the gap to stay zero, so long as an
+     * insert is not planned. The gap is increased so that the resultant gap
+     * can fit the planned insert plus the default GAP (to avoid having to
+     * grow the gap again soon afterwards), or so that the whole buffer is
+     * doubled (to protect against repeated inserts), which ever is larger.
      */
     size_t req_increase, current_size, target_size, increase;
     char *t, *tc;
@@ -124,6 +130,9 @@ int grow_gap(struct buffer *b, size_t req)
 
 int insert_char(struct buffer *b, char ch, size_t mult)
 {
+    /*
+     * Inserts the same char mult times into the left-hand side of the old gap.
+     */
     if (mult > (size_t) (b->c - b->g)) if (grow_gap(b, mult)) return 1;
     memset(b->g, ch, mult);
     b->g += mult;
@@ -132,6 +141,7 @@ int insert_char(struct buffer *b, char ch, size_t mult)
 
 int delete_char(struct buffer *b, size_t mult)
 {
+    /* Deletes mult chars by expanding the gap rightwards */
     if (mult > (size_t) (b->e - b->c)) return 1;
     b->c += mult;
     return 0;
@@ -139,6 +149,7 @@ int delete_char(struct buffer *b, size_t mult)
 
 int backspace_char(struct buffer *b, size_t mult)
 {
+    /* Backspaces mult chars by expanding the gap leftwards */
     if (mult > (size_t) (b->g - b->a)) return 1;
     b->g -= mult;
     return 0;
@@ -146,6 +157,12 @@ int backspace_char(struct buffer *b, size_t mult)
 
 struct buffer *init_buffer(size_t req)
 {
+    /*
+     * Initialises a buffer.
+     * req increases the gap size, to avoid growing the gap when the size of
+     * a planned insert is known in advance. The end of buffer character,
+     * EOBCH, is added.
+     */
     struct buffer *b;
     if ((b = malloc(sizeof(struct buffer))) == NULL) return NULL;
     if (req > SIZE_MAX - GAP) {
@@ -158,7 +175,7 @@ struct buffer *init_buffer(size_t req)
     }
     b->fn = NULL;
     b->g = b->a;
-    *(b->e = b->a + req + GAP - 1) = '~';
+    *(b->e = b->a + req + GAP - 1) = EOBCH;
     b->c = b->e;
     b->d = 0;
     b->m = 0;
@@ -168,6 +185,10 @@ struct buffer *init_buffer(size_t req)
 
 int insert_file(struct buffer *b, char *fn)
 {
+    /*
+     * Inserts a file into the right-hand side of the old gap, so that the
+     * inserted text will appear after the new cursor position.
+     */
     struct _stat64 st;
     size_t fs;
     FILE *fp;
@@ -189,6 +210,10 @@ int insert_file(struct buffer *b, char *fn)
 
 int write_buffer(struct buffer *b, char *fn)
 {
+    /*
+     * Writes a buffer to file. If the file already exists, then it will be
+     * renamed to have a '~' suffix (to serve as a backup).
+     */
     struct _stat64 st;
     int backup_ok = 0;
     size_t len, num;
@@ -230,6 +255,7 @@ int write_buffer(struct buffer *b, char *fn)
 
 int rename_buffer(struct buffer *b, char *new_name)
 {
+    /* Sets or changes the filename associated with a buffer */
     size_t len;
     char *t;
     if (new_name == NULL) return 1;
@@ -259,6 +285,7 @@ int setup_graphics(void)
 #ifdef _WIN32
 int get_screen_size(int *height, int *width)
 {
+    /* Gets the screen size in Windows */
     HANDLE out;
     CONSOLE_SCREEN_BUFFER_INFO info;
     if ((out = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE) return 1;
@@ -494,6 +521,10 @@ void diff_draw(char *ns, char *cs, int sa, int w)
 
 void test_print_buffer(struct buffer *b)
 {
+    /*
+     * Prints a buffer to the terminal in a non-graphical way.
+     * Only used for testing the gap buffer memory.
+     */
     char *q = b->a, ch;
     printf("gi = %zu, ci = %zu, ei = %zu\n", (size_t) (b->g - b->a),
         (size_t) (b->c - b->a), (size_t) (b->e - b->a));
@@ -528,6 +559,8 @@ int main(int argc, char **argv)
     char *t;
     size_t i;
     struct _stat64 st;
+
+    /* Process command line arguments */
     if (argc > SIZE_MAX) return 1;
     if (argc > 1) {
         zs = argc - 1;
@@ -555,6 +588,7 @@ int main(int argc, char **argv)
     setup_graphics();
 #endif
 
+    /* Editor loop */
     while (running) {
         if (get_screen_size(&h, &w)) QUIT(1);
 
