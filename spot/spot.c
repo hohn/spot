@@ -414,14 +414,18 @@ void reverse_scan(struct buffer *b, int th, int w, int centre)
     b->d = q - b->a;
 }
 
-int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
-    char *ns, int sa, int *cy, int *cx)
+int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, int h,
+    int w, char *ns, int sa, int *cy, int *cx)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
     char *q, ch;
-    size_t v;   /* Virtual screen index */
-    size_t j;   /* Filename character index */
-    size_t len; /* Used for printing the filename */
+    unsigned char u;
+    unsigned char rem; /* Remainder */
+    char hex_p1;       /* Hex digit in the position of *16^1 */
+    char hex_p0;       /* Hex digit in the position of *16^0 */
+    size_t v;          /* Virtual screen index */
+    size_t j;          /* Filename character index */
+    size_t len;        /* Used for printing the filename */
     /* Height of text buffer portion of the screen */
     int th = h > 2 ? h - 2 : 1;
 
@@ -462,11 +466,32 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int h, int w,
     /* Stop if screen is only one row high */
     if (h == 1) return 0;
 
-    /* Status bar */
-    if (b->fn != NULL) {
+    /*
+     * Status bar:
+     * Print indicator if last command failed.
+     */
+    *(ns + v++) = cr ? '!' : ' ';
+
+    /* Print hex of char under the cursor */
+    if (w >= 3) {
+        u = cla ? (unsigned char) *cl->c : (unsigned char) *b->c;
+        hex_p1 = u / 16 + '0';
+        rem = u % 16;
+        hex_p0 = rem >= 10 ? rem - 10 + 'A' : rem + '0';
+        *(ns + v++) = hex_p1;
+        *(ns + v++) = hex_p0;
+    }
+
+    /* Blank space */
+    if (w >= 4) {
+        *(ns + v++) = ' ';
+    }
+
+    /* Print filename */
+    if (w > 4 && b->fn != NULL) {
         len = strlen(b->fn);
         /* Truncate filename if screen is not wide enough */
-        len = len < w ? len : w;
+        len = len < w - 4 ? len : w - 4;
         /* Print file name in status bar */
         for (j = 0; j < len; ++j) *(ns + v++) = *(b->fn + j);
     }
@@ -559,6 +584,9 @@ int main(int argc, char **argv)
     size_t za = 0;     /* The index of the active text buffer */
     struct buffer *cl; /* Command line buffer */
     int cla = 0;       /* Command line buffer is active */
+    char operation;    /* Operation for which the command line is being used */
+    int cr = 0;        /* Command return value */
+    struct buffer *cb; /* Shortcut to the cursor's buffer */
     char *ns = NULL;   /* Next screen (virtual) */
     char *cs = NULL;   /* Current screen (virtual) */
     size_t ss = 0;     /* Screen size (virtual) */
@@ -598,6 +626,7 @@ int main(int argc, char **argv)
 
     /* Editor loop */
     while (running) {
+
         if (get_screen_size(&h, &w)) QUIT(1);
 
         /* Do graphics only if screen is big enough */
@@ -626,7 +655,7 @@ int main(int argc, char **argv)
                 CLEAR_SCREEN();
             }
 
-            draw_screen(*(z + za), cl, cla, h, w, ns, sa, &cy, &cx);
+            draw_screen(*(z + za), cl, cla, cr, h, w, ns, sa, &cy, &cx);
             diff_draw(ns, cs, sa, w);
             printf("\033[%d;%dH", cy + 1, cx + 1);
             /* Swap virtual screens */
@@ -635,8 +664,21 @@ int main(int argc, char **argv)
             ns = t;
         }
 
+        /* Shortcut to the cursor's buffer */
+        cb = cla ? cl : *(z + za);
+
         x = _getch();
-        insert_char(*(z + za), x, 1);
+        switch(x) {
+        case 2: cr = move_left(cb, 1); break;
+        case 6: cr = move_right(cb, 1); break;
+        case 4: cr = delete_char(cb, 1); break;
+        case 8: cr = backspace_char(cb, 1); break;
+        case 19: cr = write_buffer(cb, cb->fn); break;
+        case 18: cla = 1; operation = 'R'; break;
+
+        default: cr = insert_char(cb, x, 1); break;
+        }
+
         if (x == 'q') running = 0;
     }
 
