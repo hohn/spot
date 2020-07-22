@@ -419,13 +419,10 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, int h,
 {
     /* Virtually draw screen (and clear unused sections on the go) */
     char *q, ch;
-    unsigned char u;
-    unsigned char rem; /* Remainder */
-    char hex_p1;       /* Hex digit in the position of *16^1 */
-    char hex_p0;       /* Hex digit in the position of *16^0 */
-    size_t v;          /* Virtual screen index */
-    size_t j;          /* Filename character index */
-    size_t len;        /* Used for printing the filename */
+    unsigned char u, w_part, r_part; /* For hex calculation */
+    size_t v;                        /* Virtual screen index */
+    size_t j;                        /* Filename character index */
+    size_t len;                      /* Used for printing the filename */
     /* Height of text buffer portion of the screen */
     int th = h > 2 ? h - 2 : 1;
 
@@ -475,11 +472,10 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, int h,
     /* Print hex of char under the cursor */
     if (w >= 3) {
         u = cla ? (unsigned char) *cl->c : (unsigned char) *b->c;
-        hex_p1 = u / 16 + '0';
-        rem = u % 16;
-        hex_p0 = rem >= 10 ? rem - 10 + 'A' : rem + '0';
-        *(ns + v++) = hex_p1;
-        *(ns + v++) = hex_p0;
+        w_part = u / 16; /* Whole part */
+        r_part = u % 16; /* Remainder part */
+        *(ns + v++) = w_part >= 10 ? w_part - 10 + 'A' : w_part + '0';
+        *(ns + v++) = r_part >= 10 ? r_part - 10 + 'A' : r_part + '0';
     }
 
     /* Blank space */
