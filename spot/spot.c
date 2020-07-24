@@ -183,6 +183,15 @@ struct buffer *init_buffer(size_t req)
     return b;
 }
 
+void free_buffer(struct buffer *b)
+{
+    if (b != NULL) {
+        free(b->fn);
+        free(b->a);
+        free(b);
+    }
+}
+
 int insert_file(struct buffer *b, char *fn)
 {
     /*
@@ -219,6 +228,7 @@ int write_buffer(struct buffer *b, char *fn)
     size_t len, num;
     char *backup_fn;
     FILE *fp;
+
     if (!_stat64(fn, &st) && st.st_mode & _S_IFREG) {
         len = strlen(fn);
         if (len > SIZE_MAX - 2) return 1;
@@ -226,13 +236,23 @@ int write_buffer(struct buffer *b, char *fn)
         memcpy(backup_fn, fn, len);
         *(backup_fn + len) = '~';
         *(backup_fn + len + 1) = '\0';
+
+#ifdef _WIN32
+        if (!MoveFileEx(fn, backup_fn, MOVEFILE_REPLACE_EXISTING)) {
+            free(backup_fn);
+            return 1;
+        }
+#else
         if (rename(fn, backup_fn)) {
             free(backup_fn);
             return 1;
         }
+#endif
+
         free(backup_fn);
         backup_ok = 1;
     }
+
     if ((fp = fopen(fn, "wb")) == NULL) return 1;
     num = (size_t) (b->g - b->a);
     if (fwrite(b->a, 1, num, fp) != num) {
@@ -680,8 +700,8 @@ int main(int argc, char **argv)
 
 clean_up:
     CLEAR_SCREEN();
-
-    if (ret) printf("FAIL\n");
+    free_buffer(cl);
+    for (i = 0; i < zs; ++i) free_buffer(*(z + i));
 
     return ret;
 }
