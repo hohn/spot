@@ -228,7 +228,7 @@ int write_buffer(struct buffer *b, char *fn)
     size_t len, num;
     char *backup_fn;
     FILE *fp;
-
+    if (fn == NULL) return 1;
     if (!_stat64(fn, &st) && st.st_mode & _S_IFREG) {
         len = strlen(fn);
         if (len > SIZE_MAX - 2) return 1;
@@ -594,7 +594,10 @@ void test_print_buffer(struct buffer *b)
 
 int main(int argc, char **argv)
 {
-    int ret = 0, running = 1, x, h, w, cy, cx;
+    int ret = 0;       /* Editor's return value */
+    int running = 1;   /* Editor is running */
+    int h, w;          /* Screen height and width */
+    int cy, cx;        /* Cursor's screen coordinates */
     struct buffer **z; /* The text buffers */
     size_t zs;         /* Number of text buffers */
     size_t za = 0;     /* The index of the active text buffer */
@@ -608,9 +611,10 @@ int main(int argc, char **argv)
     size_t ss = 0;     /* Screen size (virtual) */
     size_t sa = 0;     /* Terminal screen area (real) */
     size_t c_sa;       /* Current terminal screen area (real) */
-    char *t;
-    size_t i;
-    struct _stat64 st;
+    int key1, key2;    /* Keyboard keys (one physical key can send multiple) */
+    char *t;           /* Temporary pointer */
+    size_t i;          /* Generic index */
+    struct _stat64 st; /* For stat calls */
 
     /* Process command line arguments */
     if (argc > SIZE_MAX) return 1;
@@ -683,8 +687,17 @@ int main(int argc, char **argv)
         /* Shortcut to the cursor's buffer */
         cb = cla ? cl : *(z + za);
 
-        x = _getch();
-        switch(x) {
+        key1 = _getch();
+        /* Remap special keyboard keys */
+        if (key1 == 0xE0) {
+            key2 = _getch();
+            switch(key2) {
+            case 'K': key1 = 2; break; /* Left */
+            case 'M': key1 = 6; break; /* Right */
+            case 'S': key1 = 4; break; /* Delete */
+            }
+        }
+        switch(key1) {
         case 2: cr = move_left(cb, 1); break;
         case 6: cr = move_right(cb, 1); break;
         case 4: cr = delete_char(cb, 1); break;
@@ -692,10 +705,10 @@ int main(int argc, char **argv)
         case 19: cr = write_buffer(cb, cb->fn); break;
         case 18: cla = 1; operation = 'R'; break;
 
-        default: cr = insert_char(cb, x, 1); break;
+        default: cr = insert_char(cb, key1, 1); break;
         }
 
-        if (x == 'q') running = 0;
+        if (key1 == 'q') running = 0;
     }
 
 clean_up:
