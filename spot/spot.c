@@ -44,6 +44,15 @@
  */
 #define EOBCH '~'
 
+/* Command keys */
+#define MULT 21
+#define LEFT 2
+#define RIGHT 6
+#define DEL 4
+#define BKSPACE 8
+#define SAVE 19
+#define RENAME 18
+
 /* ANSI escape sequences */
 #define CLEAR_SCREEN() printf("\033[2J")
 #define CLEAR_LINE() printf("\033[2K")
@@ -612,6 +621,8 @@ int main(int argc, char **argv)
     size_t sa = 0;     /* Terminal screen area (real) */
     size_t c_sa;       /* Current terminal screen area (real) */
     int key1, key2;    /* Keyboard keys (one physical key can send multiple) */
+    int digit;         /* Numerical digit */
+    size_t mult;       /* Command multiplier */
     char *t;           /* Temporary pointer */
     size_t i;          /* Generic index */
     struct _stat64 st; /* For stat calls */
@@ -646,6 +657,8 @@ int main(int argc, char **argv)
 
     /* Editor loop */
     while (running) {
+
+top_of_editor_loop:
 
         if (get_screen_size(&h, &w)) QUIT(1);
 
@@ -688,24 +701,42 @@ int main(int argc, char **argv)
         cb = cla ? cl : *(z + za);
 
         key1 = _getch();
+
+        mult = 1; /* Default is to perform a command once */
+        /* Read multiplier number */
+        if (key1 == MULT) {
+            mult = 0;
+            while (isdigit(key1 = _getch())) {
+                if (mult > SIZE_MAX / 10) {cr = 1; goto top_of_editor_loop;}
+                mult *= 10;
+                digit = key1 - '0';
+                if (mult > SIZE_MAX - digit) {cr = 1; goto top_of_editor_loop;}
+                mult += digit;
+            }
+        }
+
         /* Remap special keyboard keys */
         if (key1 == 0xE0) {
             key2 = _getch();
             switch(key2) {
-            case 'K': key1 = 2; break; /* Left */
-            case 'M': key1 = 6; break; /* Right */
-            case 'S': key1 = 4; break; /* Delete */
+            case 'K': key1 = LEFT; break;
+            case 'M': key1 = RIGHT; break;
+            case 'S': key1 = DEL; break;
             }
         }
-        switch(key1) {
-        case 2: cr = move_left(cb, 1); break;
-        case 6: cr = move_right(cb, 1); break;
-        case 4: cr = delete_char(cb, 1); break;
-        case 8: cr = backspace_char(cb, 1); break;
-        case 19: cr = write_buffer(cb, cb->fn); break;
-        case 18: cla = 1; operation = 'R'; break;
 
-        default: cr = insert_char(cb, key1, 1); break;
+        /* Remap carriage return to line feed */
+        if (key1 == '\r') key1 = '\n';
+
+        switch(key1) {
+        case LEFT: cr = move_left(cb, mult); break;
+        case RIGHT: cr = move_right(cb, mult); break;
+        case DEL: cr = delete_char(cb, mult); break;
+        case BKSPACE: cr = backspace_char(cb, mult); break;
+        case SAVE: cr = write_buffer(cb, cb->fn); break;
+        case RENAME: cla = 1; operation = 'R'; break;
+
+        default: cr = insert_char(cb, key1, mult); break;
         }
 
         if (key1 == 'q') running = 0;
