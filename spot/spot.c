@@ -50,6 +50,9 @@
 #define RIGHT 6
 #define DEL 4
 #define BKSPACE 8
+
+/* File commands */
+#define FILEMENU 24
 #define SAVE 19
 #define RENAME 18
 
@@ -296,6 +299,24 @@ int rename_buffer(struct buffer *b, char *new_name)
     *(t + len) = '\0';
     free(b->fn);
     b->fn = t;
+    return 0;
+}
+
+int buffer_to_str(struct buffer *b, char **p_to_str)
+{
+    char *t, *q, ch, *p;
+    /* OK to add one because of EOBCH */
+    size_t s = b->g - b->a + b->e - b->c + 1;
+    if ((t = malloc(s)) == NULL) return 1;
+    p = t;
+    /* Strip out \0 chars */
+    q = b->a;
+    while (q != b->g) if ((ch = *q++) != '\0') *p++ = ch;
+    q = b->c;
+    while (q != b->e) if ((ch = *q++) != '\0') *p++ = ch;
+    *p = '\0';
+    free(*p_to_str);
+    *p_to_str = t;
     return 0;
 }
 
@@ -603,29 +624,32 @@ void test_print_buffer(struct buffer *b)
 
 int main(int argc, char **argv)
 {
-    int ret = 0;       /* Editor's return value */
-    int running = 1;   /* Editor is running */
-    int h, w;          /* Screen height and width */
-    int cy, cx;        /* Cursor's screen coordinates */
-    struct buffer **z; /* The text buffers */
-    size_t zs;         /* Number of text buffers */
-    size_t za = 0;     /* The index of the active text buffer */
-    struct buffer *cl; /* Command line buffer */
-    int cla = 0;       /* Command line buffer is active */
-    char operation;    /* Operation for which the command line is being used */
-    int cr = 0;        /* Command return value */
-    struct buffer *cb; /* Shortcut to the cursor's buffer */
-    char *ns = NULL;   /* Next screen (virtual) */
-    char *cs = NULL;   /* Current screen (virtual) */
-    size_t ss = 0;     /* Screen size (virtual) */
-    size_t sa = 0;     /* Terminal screen area (real) */
-    size_t c_sa;       /* Current terminal screen area (real) */
-    int key1, key2;    /* Keyboard keys (one physical key can send multiple) */
-    int digit;         /* Numerical digit */
-    size_t mult;       /* Command multiplier */
-    char *t;           /* Temporary pointer */
-    size_t i;          /* Generic index */
-    struct _stat64 st; /* For stat calls */
+    int ret = 0;         /* Editor's return value */
+    int running = 1;     /* Editor is running */
+    int h, w;            /* Screen height and width */
+    int cy, cx;          /* Cursor's screen coordinates */
+    struct buffer **z;   /* The text buffers */
+    size_t zs;           /* Number of text buffers */
+    size_t za = 0;       /* The index of the active text buffer */
+    struct buffer *cl;   /* Command line buffer */
+    int cla = 0;         /* Command line buffer is active */
+    /* Operation for which the command line is being used */
+    char operation;
+    char *cl_str = NULL; /* Command line buffer converted to a string */
+    int cr = 0;          /* Command return value */
+    struct buffer *cb;   /* Shortcut to the cursor's buffer */
+    char *ns = NULL;     /* Next screen (virtual) */
+    char *cs = NULL;     /* Current screen (virtual) */
+    size_t ss = 0;       /* Screen size (virtual) */
+    size_t sa = 0;       /* Terminal screen area (real) */
+    size_t c_sa;         /* Current terminal screen area (real) */
+    /* Keyboard keys (one physical key can send multiple) */
+    int key1, key2;
+    int digit;           /* Numerical digit */
+    size_t mult;         /* Command multiplier */
+    char *t;             /* Temporary pointer */
+    size_t i;            /* Generic index */
+    struct _stat64 st;   /* For stat calls */
 
     /* Process command line arguments */
     if (argc > SIZE_MAX) return 1;
@@ -728,15 +752,33 @@ top_of_editor_loop:
         /* Remap carriage return to line feed */
         if (key1 == '\r') key1 = '\n';
 
-        switch(key1) {
-        case LEFT: cr = move_left(cb, mult); break;
-        case RIGHT: cr = move_right(cb, mult); break;
-        case DEL: cr = delete_char(cb, mult); break;
-        case BKSPACE: cr = backspace_char(cb, mult); break;
-        case SAVE: cr = write_buffer(cb, cb->fn); break;
-        case RENAME: cla = 1; operation = 'R'; break;
-
-        default: cr = insert_char(cb, key1, mult); break;
+        /* Commands related to files */
+        if (key1 == FILEMENU) {
+            key2 = _getch();
+            switch (key2) {
+            case SAVE: cr = write_buffer(cb, cb->fn); break;
+            case RENAME: cla = 1; operation = 'R'; break;
+            }
+        } else {
+            /* Non-file related commands */
+            switch(key1) {
+            case LEFT: cr = move_left(cb, mult); break;
+            case RIGHT: cr = move_right(cb, mult); break;
+            case DEL: cr = delete_char(cb, mult); break;
+            case BKSPACE: cr = backspace_char(cb, mult); break;
+            case '\n':
+                if (cla) {
+                    cla = 0;
+                    if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
+                    switch (operation) {
+                    case 'R': cr = rename_buffer(*(z + za), cl_str); break;
+                    }
+                } else {
+                    cr = insert_char(cb, key1, mult);
+                }
+                break;
+            default: cr = insert_char(cb, key1, mult); break;
+            }
         }
 
         if (key1 == 'q') running = 0;
