@@ -22,8 +22,8 @@
 #include <sys/stat.h>
 
 #ifdef _WIN32
-    #include <windows.h>
-    #include <conio.h>
+#include <windows.h>
+#include <conio.h>
 #endif
 
 #include <stdint.h>
@@ -50,6 +50,11 @@
 #define RIGHT 6
 #define DEL 4
 #define BKSPACE 8
+#define SETMARK 0
+#define COPY 3
+#define CUT 23
+#define PASTE 25
+#define SEARCH 19
 
 /* File commands */
 #define FILEMENU 24
@@ -81,6 +86,20 @@ struct buffer {
     int m_set; /* Mark set indicator */
 };
 
+/* Memory structure: used for copy and paste */
+struct mem {
+    char *p;  /* Pointer to memory */
+    size_t u; /* Used memory amount (less than or equal to the size) */
+    size_t s; /* Memory size */
+};
+
+#ifdef _WIN32
+char *memmem(char *big, size_t big_s, char *little, size_t little_s)
+{
+    return NULL;
+}
+#endif
+
 int move_left(struct buffer *b, size_t mult)
 {
     /*
@@ -105,6 +124,17 @@ int move_right(struct buffer *b, size_t mult)
     memmove(b->g, b->c, mult);
     b->g += mult;
     b->c += mult;
+    return 0;
+}
+
+int search(struct buffer *b, char *str)
+{
+    /* Forward search, excludes cursor and EOBCH */
+    char *q;
+    size_t len = strlen(str);
+    if (b->e - b->c < 1) return 1;
+    if ((q = memmem(b->c + 1, b->e - b->c, str, len)) == NULL) return 1;
+    if (move_right(b, q - b->c)) return 1;
     return 0;
 }
 
@@ -148,6 +178,7 @@ int insert_char(struct buffer *b, char ch, size_t mult)
     if (mult > (size_t) (b->c - b->g)) if (grow_gap(b, mult)) return 1;
     memset(b->g, ch, mult);
     b->g += mult;
+    b->m_set = 0;
     return 0;
 }
 
@@ -156,6 +187,7 @@ int delete_char(struct buffer *b, size_t mult)
     /* Deletes mult chars by expanding the gap rightwards */
     if (mult > (size_t) (b->e - b->c)) return 1;
     b->c += mult;
+    b->m_set = 0;
     return 0;
 }
 
@@ -164,6 +196,7 @@ int backspace_char(struct buffer *b, size_t mult)
     /* Backspaces mult chars by expanding the gap leftwards */
     if (mult > (size_t) (b->g - b->a)) return 1;
     b->g -= mult;
+    b->m_set = 0;
     return 0;
 }
 
@@ -204,6 +237,24 @@ void free_buffer(struct buffer *b)
     }
 }
 
+struct mem *init_mem(void)
+{
+    struct mem *p;
+    if ((p = malloc(sizeof(struct mem))) == NULL) return NULL;
+    p->p = NULL;
+    p->u = 0;
+    p->s = 0;
+    return p;
+}
+
+void free_mem(struct mem *p)
+{
+    if (p != NULL) {
+        free(p->p);
+        free(p);
+    }
+}
+
 int insert_file(struct buffer *b, char *fn)
 {
     /*
@@ -226,6 +277,7 @@ int insert_file(struct buffer *b, char *fn)
     }
     if (fclose(fp)) return 1;
     b->c -= fs;
+    b->m_set = 0;
     return 0;
 }
 
@@ -317,6 +369,57 @@ int buffer_to_str(struct buffer *b, char **p_to_str)
     *p = '\0';
     free(*p_to_str);
     *p_to_str = t;
+    return 0;
+}
+
+void set_mark(struct buffer *b)
+{
+    b->m = b->g - b->a;
+    b->m_set = 1;
+}
+
+int copy_region(struct buffer *b, struct mem *p, int del)
+{
+    size_t ci = b->g - b->a; /* Cursor index */
+    size_t s;                /* Size of region */
+    char *t;                 /* Temporary pointer */
+    if (!b->m_set) return 1;
+    if (b->m == ci) return 0;
+    if (b->m < ci) {
+        s = ci - b->m;
+        if (s > p->s) {
+            if ((t = malloc(s)) == NULL) return 1;
+            free(p->p);
+            p->p = t;
+            p->s = s;
+        }
+        memcpy(p->p, b->a + b->m, s);
+        p->u = s;
+        if (del) b->g -= s;
+    } else {
+        s = b->m - ci;
+        if (s > p->s) {
+            if ((t = malloc(s)) == NULL) return 1;
+            free(p->p);
+            p->p = t;
+            p->s = s;
+        }
+        memcpy(p->p, b->c, s);
+        p->u = s;
+        if (del) b->c += s;
+    }
+    b->m_set = 0;
+    return 0;
+}
+
+int paste(struct buffer *b, struct mem *p, size_t mult)
+{
+    size_t s;
+    if (mult && p->u > SIZE_MAX / mult) return 1;
+    s = p->u * mult;
+    if (s > (size_t) (b->c - b->g)) if (grow_gap(b, s)) return 1;
+    while (mult--) {memcpy(b->g, p->p, p->u); b->g += p->u;}
+    b->m_set = 0;
     return 0;
 }
 
@@ -636,6 +739,7 @@ int main(int argc, char **argv)
     /* Operation for which the command line is being used */
     char operation;
     char *cl_str = NULL; /* Command line buffer converted to a string */
+    struct mem *p;       /* Paste memory */
     int cr = 0;          /* Command return value */
     struct buffer *cb;   /* Shortcut to the cursor's buffer */
     char *ns = NULL;     /* Next screen (virtual) */
@@ -674,6 +778,7 @@ int main(int argc, char **argv)
         if ((*z = init_buffer(0)) == NULL) QUIT(1);
     }
     if ((cl = init_buffer(0)) == NULL) QUIT(1);
+    if ((p = init_mem()) == NULL) QUIT(1);
 
 #ifdef _WIN32
     setup_graphics();
@@ -766,12 +871,18 @@ top_of_editor_loop:
             case RIGHT: cr = move_right(cb, mult); break;
             case DEL: cr = delete_char(cb, mult); break;
             case BKSPACE: cr = backspace_char(cb, mult); break;
+            case SETMARK: set_mark(cb); break;
+            case COPY: cr = copy_region(cb, p, 0); break;
+            case CUT: cr = copy_region(cb, p, 1); break;
+            case PASTE: cr = paste(cb, p, mult); break;
+            case SEARCH: cla = 1; operation = 'S'; break;
             case '\n':
                 if (cla) {
                     cla = 0;
                     if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
                     switch (operation) {
                     case 'R': cr = rename_buffer(*(z + za), cl_str); break;
+                    case 'S': cr = search(*(z + za), cl_str); break;
                     }
                 } else {
                     cr = insert_char(cb, key1, mult);
@@ -788,6 +899,9 @@ clean_up:
     CLEAR_SCREEN();
     free_buffer(cl);
     for (i = 0; i < zs; ++i) free_buffer(*(z + i));
+    free_mem(p);
+    free(ns);
+    free(cs);
 
     return ret;
 }
