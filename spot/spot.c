@@ -93,13 +93,6 @@ struct mem {
     size_t s; /* Memory size */
 };
 
-#ifdef _WIN32
-char *memmem(char *big, size_t big_s, char *little, size_t little_s)
-{
-    return NULL;
-}
-#endif
-
 int move_left(struct buffer *b, size_t mult)
 {
     /*
@@ -127,14 +120,9 @@ int move_right(struct buffer *b, size_t mult)
     return 0;
 }
 
-int search(struct buffer *b, char *str)
+int search(struct buffer *b, struct buffer *sb, size_t *bad)
 {
     /* Forward search, excludes cursor and EOBCH */
-    char *q;
-    size_t len = strlen(str);
-    if (b->e - b->c < 1) return 1;
-    if ((q = memmem(b->c + 1, b->e - b->c, str, len)) == NULL) return 1;
-    if (move_right(b, q - b->c)) return 1;
     return 0;
 }
 
