@@ -86,7 +86,7 @@ struct buffer {
     int m_set; /* Mark set indicator */
 };
 
-/* Memory structure: used for copy and paste */
+/* Memory structure: used for copy and paste, and search */
 struct mem {
     char *p;  /* Pointer to memory */
     size_t u; /* Used memory amount (less than or equal to the size) */
@@ -120,9 +120,40 @@ int move_right(struct buffer *b, size_t mult)
     return 0;
 }
 
-int search(struct buffer *b, struct buffer *sb, size_t *bad)
+int search(struct buffer *b, struct mem *se, size_t *bad)
 {
-    /* Forward search, excludes cursor and EOBCH */
+    /*
+     * Forward search, excludes cursor and EOBCH.
+     * Uses the Quick Search algorithm.
+     */
+    unsigned char *q, *stop, *q_copy, *pat;
+    size_t patlen;
+    int found = 0;
+    if (!se->u || b->e - b->c <= 1) return 1;
+    size_t s = b->e - b->c - 1;
+    if (se->u > s) return 1;
+    if (se->u == 1) {
+        /* Single character patterns */
+        q = memchr(b->c + 1, *se->p, s);
+        if (q == NULL) return 1;
+    } else {
+        /* Quick Search algorithm */
+        q = b->c + 1;
+        stop = b->e - se->u; /* Inclusive */
+        while (q <= stop) {
+            q_copy = q;
+            pat = se->p;
+            patlen = se->u;
+            /* Compare pattern to text */
+            do {if (*q_copy++ != *pat++) break;} while (--patlen);
+            /* Match found */
+            if (!patlen) {found = 1; break;}
+            /* Jump using the bad character table */
+            q += *(bad + *(q + se->u));
+        }
+        if (!found) return 1;
+    }
+    if (move_right(b, q - b->c)) return 1;
     return 0;
 }
 
@@ -357,6 +388,24 @@ int buffer_to_str(struct buffer *b, char **p_to_str)
     *p = '\0';
     free(*p_to_str);
     *p_to_str = t;
+    return 0;
+}
+
+int buffer_to_mem(struct buffer *b, struct mem *m)
+{
+    size_t s_bg = b->g - b->a; /* Size before gap */
+    size_t s_ag = b->e - b->c; /* Size after gap */
+    size_t s = s_bg + s_ag;    /* Text size of buffer */
+    char *t;                   /* Temporary pointer */
+    if (s > m->s) {
+        if ((t = malloc(s)) == NULL) return 1;
+        free(m->p);
+        m->p = t;
+        m->s = s;
+    }
+    memcpy(m->p, b->a, s_bg);
+    memcpy(m->p + s_bg, b->c, s_ag);
+    m->u = s;
     return 0;
 }
 
@@ -725,8 +774,12 @@ int main(int argc, char **argv)
     struct buffer *cl;   /* Command line buffer */
     int cla = 0;         /* Command line buffer is active */
     /* Operation for which the command line is being used */
-    char operation;
+    char operation = '\0';
     char *cl_str = NULL; /* Command line buffer converted to a string */
+    /* Bad character table for the Quick Search algorithm */
+    size_t bad[UCHAR_MAX + 1];
+    unsigned char *pat;  /* Unsigned shortcut to search pattern */
+    struct mem *se;      /* Search memory */
     struct mem *p;       /* Paste memory */
     int cr = 0;          /* Command return value */
     struct buffer *cb;   /* Shortcut to the cursor's buffer */
@@ -765,7 +818,11 @@ int main(int argc, char **argv)
         if ((z = malloc(sizeof(struct buffer *))) == NULL) return 1;
         if ((*z = init_buffer(0)) == NULL) QUIT(1);
     }
+    /* Initialise command line buffer */
     if ((cl = init_buffer(0)) == NULL) QUIT(1);
+    /* Initialise search memory */
+    if ((se = init_mem()) == NULL) QUIT(1);
+    /* Initialise paste memory */
     if ((p = init_mem()) == NULL) QUIT(1);
 
 #ifdef _WIN32
@@ -867,11 +924,22 @@ top_of_editor_loop:
             case '\n':
                 if (cla) {
                     cla = 0;
-                    if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
-                    switch (operation) {
-                    case 'R': cr = rename_buffer(*(z + za), cl_str); break;
-                    case 'S': cr = search(*(z + za), cl_str); break;
+                    if (operation == 'R') {
+                        if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
+                        cr = rename_buffer(*(z + za), cl_str); break;
+                    } else if (operation == 'S') {
+                        if (buffer_to_mem(cl, se)) {cr = 1; break;}
+                        if (se->u > 1) {
+                            /* Set bad character table */
+                            for (i = 0; i <= UCHAR_MAX; ++i)
+                                *(bad + i) = se->u + 1;
+                            pat = (unsigned char *) se->p;
+                            for (i = 0; i < se->u; ++i)
+                                *(bad + *(pat + i)) = se->u - i;
+                        }
+                        cr = search(*(z + za), se, bad); break;
                     }
+                    operation = '\0';
                 } else {
                     cr = insert_char(cb, key1, mult);
                 }
@@ -887,6 +955,7 @@ clean_up:
     CLEAR_SCREEN();
     free_buffer(cl);
     for (i = 0; i < zs; ++i) free_buffer(*(z + i));
+    free_mem(se);
     free_mem(p);
     free(ns);
     free(cs);
