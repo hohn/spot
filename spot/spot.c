@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 /*
  * The default gap size. Must be at least 1.
@@ -795,6 +796,9 @@ int main(int argc, char **argv)
     char *t;             /* Temporary pointer */
     size_t i;            /* Generic index */
     struct _stat64 st;   /* For stat calls */
+
+    /* Ignore interrupt, sent by ^C */
+    if (signal(SIGINT, SIG_IGN) == SIG_ERR) return 1;
 
     /* Process command line arguments */
     if (argc > SIZE_MAX) return 1;
