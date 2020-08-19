@@ -125,6 +125,15 @@ int move_right(struct buffer *b, size_t mult)
     return 0;
 }
 
+void set_bad(size_t *bad, struct mem *se)
+{
+    /* Sets the bad character table for the Quick Search algorithm */
+    unsigned char *pat = (unsigned char *) se->p; /* Search pattern */
+    size_t i;
+    for (i = 0; i <= UCHAR_MAX; ++i) *(bad + i) = se->u + 1;
+    for (i = 0; i < se->u; ++i) *(bad + *(pat + i)) = se->u - i;
+}
+
 int search(struct buffer *b, struct mem *se, size_t *bad)
 {
     /*
@@ -783,7 +792,6 @@ int main(int argc, char **argv)
     char *cl_str = NULL; /* Command line buffer converted to a string */
     /* Bad character table for the Quick Search algorithm */
     size_t bad[UCHAR_MAX + 1];
-    unsigned char *pat;  /* Unsigned shortcut to search pattern */
     struct mem *se;      /* Search memory */
     struct mem *p;       /* Paste memory */
     int cr = 0;          /* Command return value */
@@ -938,12 +946,7 @@ top_of_editor_loop:
                     } else if (operation == 'S') {
                         if (buffer_to_mem(cl, se)) {cr = 1; break;}
                         if (se->u > 1) {
-                            /* Set bad character table */
-                            for (i = 0; i <= UCHAR_MAX; ++i)
-                                *(bad + i) = se->u + 1;
-                            pat = (unsigned char *) se->p;
-                            for (i = 0; i < se->u; ++i)
-                                *(bad + *(pat + i)) = se->u - i;
+                            set_bad(bad, se);
                         }
                         cr = search(*(z + za), se, bad); break;
                     }
