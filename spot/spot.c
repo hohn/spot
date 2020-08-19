@@ -62,6 +62,10 @@
 #define SAVE 19
 #define RENAME 18
 
+/* size_t integer overflow tests */
+#define AOF(a, b) ((a) > SIZE_MAX - (b))
+#define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
+
 /* ANSI escape sequences */
 #define CLEAR_SCREEN() printf("\033[2J")
 #define CLEAR_LINE() printf("\033[2K")
@@ -171,12 +175,12 @@ int grow_gap(struct buffer *b, size_t req)
      */
     size_t req_increase, current_size, target_size, increase;
     char *t, *tc;
-    if (req > SIZE_MAX - GAP) return 1;
+    if (AOF(req, GAP)) return 1;
     /* Only call grow_gap if req > (b->c - b->g) */
     req_increase = req + GAP - (b->c - b->g);
     current_size = b->e - b->a + 1;
     increase = current_size > req_increase ? current_size : req_increase;
-    if (current_size > SIZE_MAX - increase) return 1;
+    if (AOF(current_size, increase)) return 1;
     target_size = current_size + increase;
     if ((t = malloc(target_size)) == NULL) return 1;
     memcpy(t, b->a, b->g - b->a);
@@ -230,7 +234,7 @@ struct buffer *init_buffer(size_t req)
      */
     struct buffer *b;
     if ((b = malloc(sizeof(struct buffer))) == NULL) return NULL;
-    if (req > SIZE_MAX - GAP) {
+    if (AOF(req, GAP)) {
         free(b);
         return NULL;
     }
@@ -315,7 +319,7 @@ int write_buffer(struct buffer *b, char *fn)
     if (fn == NULL) return 1;
     if (!_stat64(fn, &st) && st.st_mode & _S_IFREG) {
         len = strlen(fn);
-        if (len > SIZE_MAX - 2) return 1;
+        if (AOF(len, 2)) return 1;
         if ((backup_fn = malloc(len + 2)) == NULL) return 1;
         memcpy(backup_fn, fn, len);
         *(backup_fn + len) = '~';
@@ -365,7 +369,7 @@ int rename_buffer(struct buffer *b, char *new_name)
     if (new_name == NULL) return 1;
     len = strlen(new_name);
     if (!len) return 1;
-    if (len == SIZE_MAX) return 1;
+    if (AOF(len, 1)) return 1;
     if ((t = malloc(len + 1)) == NULL) return 1;
     memcpy(t, new_name, len);
     *(t + len) = '\0';
@@ -453,7 +457,7 @@ int copy_region(struct buffer *b, struct mem *p, int del)
 int paste(struct buffer *b, struct mem *p, size_t mult)
 {
     size_t s;
-    if (mult && p->u > SIZE_MAX / mult) return 1;
+    if (MOF(mult, p->u)) return 1;
     s = p->u * mult;
     if (s > (size_t) (b->c - b->g)) if (grow_gap(b, s)) return 1;
     while (mult--) {memcpy(b->g, p->p, p->u); b->g += p->u;}
@@ -885,10 +889,10 @@ top_of_editor_loop:
         if (key1 == MULT) {
             mult = 0;
             while (isdigit(key1 = _getch())) {
-                if (mult > SIZE_MAX / 10) {cr = 1; goto top_of_editor_loop;}
+                if (MOF(mult, 10)) {cr = 1; goto top_of_editor_loop;}
                 mult *= 10;
                 digit = key1 - '0';
-                if (mult > SIZE_MAX - digit) {cr = 1; goto top_of_editor_loop;}
+                if (AOF(mult, digit)) {cr = 1; goto top_of_editor_loop;}
                 mult += digit;
             }
         }
