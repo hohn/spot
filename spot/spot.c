@@ -19,7 +19,15 @@
  * Dedicated to my son who was only a 4mm `spot' in his first ultrasound.
  */
 
+#ifdef __linux__
+#include <sys/types.h>
+#endif
+
 #include <sys/stat.h>
+
+#ifdef __linux__
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
