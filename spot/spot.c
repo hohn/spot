@@ -33,11 +33,14 @@
 #include <signal.h>
 
 /*
- * The default gap size. Must be at least 1.
+ * Default gap size. Must be at least 1.
  * It is good to set small while testing, but BUFSIZ is a sensible choice for
  * real use (to limit the expense of growing the gap).
  */
 #define GAP 2
+
+/* Default number of spare text buffer pointers. Must be at least 1 */
+#define SPARETB 10
 
 /*
  * End Of Buffer CHaracter. This cannot be deleted, but will not be written to
@@ -72,7 +75,7 @@
 
 /*
  * Sets the return value for the text editor and jumps to the clean up.
- * Only use in main().
+ * Only use in main.
  */
 #define QUIT(r) do {ret = r; goto clean_up;} while (0)
 
@@ -89,6 +92,14 @@ struct buffer {
     size_t d;  /* Draw start index */
     size_t m;  /* Mark index */
     int m_set; /* Mark set indicator */
+};
+
+/* Structure to keep track of the text buffers */
+struct tb {
+    struct buffer **z; /* Text buffers */
+    size_t u;          /* Used number of text buffers */
+    size_t n;          /* Total number of text buffers */
+    size_t a;          /* The index of the active text buffer */
 };
 
 /* Memory structure: used for copy and paste, and search */
@@ -267,6 +278,33 @@ void free_buffer(struct buffer *b)
         free(b->fn);
         free(b->a);
         free(b);
+    }
+}
+
+struct tb *init_tb(size_t req)
+{
+    /* Initialises structure to keep track of the text buffers */
+    struct tb *z;
+    size_t n;
+    if ((z = malloc(sizeof(struct tb))) == NULL) return NULL;
+    if (AOF(req, SPARETB)) {free(z); return NULL;}
+    n = req + SPARETB;
+    if (MOF(n, sizeof(struct buffer *))) {free(z); return NULL;}
+    if ((z->z = malloc(n * sizeof(struct buffer *))) == NULL)
+        {free(z); return NULL;}
+    z->n = n;
+    z->u = 0;
+    z->a = 0;
+    return z;
+}
+
+void free_tb(struct tb *z)
+{
+    size_t i;
+    if (z != NULL) {
+        for (i = 0; i < z->u; ++i) free_buffer(*(z->z + i));
+        free(z->z);
+        free(z);
     }
 }
 
@@ -487,7 +525,7 @@ int setup_graphics(void)
 #endif
 
 #ifdef _WIN32
-int get_screen_size(int *height, int *width)
+int get_screen_size(size_t *height, size_t *width)
 {
     /* Gets the screen size in Windows */
     HANDLE out;
@@ -500,7 +538,7 @@ int get_screen_size(int *height, int *width)
 }
 #endif
 
-void reverse_scan(struct buffer *b, int th, int w, int centre)
+void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
 {
     /*
      * This is the most complicated function in the text editor.
@@ -510,17 +548,17 @@ void reverse_scan(struct buffer *b, int th, int w, int centre)
      * on the middle line.
      */
 
-    size_t ci = b->g - b->a;       /* Cursor index */
-    int ta = th * w;               /* Text screen area */
-    int hth = th > 2 ? th / 2 : 1; /* Half the text screen height */
-    int hta = hth * w;             /* Half the text screen area */
-    int target_h;                  /* The height to stop scanning */
-    int height_count = 0;          /* Keeping track of the height while scanning */
+    size_t ci = b->g - b->a;          /* Cursor index */
+    size_t ta = th * w;               /* Text screen area */
+    size_t hth = th > 2 ? th / 2 : 1; /* Half the text screen height */
+    size_t hta = hth * w;             /* Half the text screen area */
+    size_t target_h;                  /* The height to stop scanning */
+    size_t height_count = 0;          /* Keeping track of the height while scanning */
     /*
      * Keeping track of the width while scanning.
      * Start from one to count the cursor.
      */
-    int width_count = 1;
+    size_t width_count = 1;
     char *q;                       /* Pointer used for the reverse scan */
     char *q_stop;                  /* Pointer where the reverse scan is to stop (inclusive) */
     char *q_d = b->a + b->d;       /* Current draw start pointer */
@@ -618,8 +656,8 @@ void reverse_scan(struct buffer *b, int th, int w, int centre)
     b->d = q - b->a;
 }
 
-int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, int h,
-    int w, char *ns, int sa, int *cy, int *cx)
+int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
+    size_t w, char *ns, size_t *cy, size_t *cx)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
     char *q, ch;
@@ -628,10 +666,11 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, int h,
     size_t j;                        /* Filename character index */
     size_t len;                      /* Used for printing the filename */
     /* Height of text buffer portion of the screen */
-    int th = h > 2 ? h - 2 : 1;
+    size_t th = h > 2 ? h - 2 : 1;
 
     /* Text buffer */
     reverse_scan(b, th, w, 0);
+
     v = 0;
     q = b->a + b->d;
     /* Print before the gap */
@@ -732,17 +771,17 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, int h,
     return 0;
 }
 
-void diff_draw(char *ns, char *cs, int sa, int w)
+void diff_draw(char *ns, char *cs, size_t sa, size_t w)
 {
     /* Physically draw the screen where the virtual screens differ */
-    int v;          /* Index */
+    size_t v;       /* Index */
     int in_pos = 0; /* If in position for printing (no move is required) */
     char ch;
     for (v = 0; v < sa; ++v) {
         if ((ch = *(ns + v)) != *(cs + v)) {
             if (!in_pos) {
                 /* Move cursor: top left corner is (1, 1) not (0, 0) so need to add one */
-                printf("\033[%d;%dH", v / w + 1, v - (v / w) * w + 1);
+                printf("\033[%zu;%zuH", v / w + 1, v - (v / w) * w + 1);
                 in_pos = 1;
             }
             putchar(ch);
@@ -776,38 +815,71 @@ void test_print_buffer(struct buffer *b)
     putchar('\n');
 }
 
+int new_buffer(struct tb *z, char *fn)
+{
+    struct _stat64 st;
+    size_t new_n;
+    struct buffer **t;
+    struct buffer *b;  /* Buffer shortcut */
+    /* Grow to take more text buffers */
+    if(z->u == z->n) {
+        if (AOF(z->u, SPARETB)) return 1;
+        new_n = z->u + SPARETB;
+        if (MOF(new_n, sizeof(struct buffer *))) return 1;
+        if ((t = realloc(z->z, new_n * sizeof(struct buffer *))) == NULL) return 1;
+        z->z = t;
+        z->n = new_n;
+    }
+    b = *(z->z + z->u); /* Create shortcut */
+    if (fn != NULL && !_stat64(fn, &st)) {
+        /* File exists */
+        if (!((st.st_mode & _S_IFMT) == _S_IFREG)
+            || st.st_size > SIZE_MAX || st.st_size < 0) return 1;
+        if ((b = init_buffer((size_t) st.st_size)) == NULL)
+            return 1;
+        if (rename_buffer(b, fn)) {free_buffer(b); return 1;}
+        if (insert_file(b, fn)) {free_buffer(b); return 1;}
+    } else {
+        /* New file */
+        if ((b = init_buffer(0)) == NULL) return 1;
+        if (fn != NULL && rename_buffer(b, fn)) {free_buffer(b); return 1;}
+    }
+    /* Success */
+    *(z->z + z->u) = b; /* Link back */
+    z->a = z->u; /* Make the active text buffer the new text buffer */
+    ++z->u;      /* Increase the number of used text buffers */
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
-    int ret = 0;         /* Editor's return value */
-    int running = 1;     /* Editor is running */
-    int h, w;            /* Screen height and width */
-    int cy, cx;          /* Cursor's screen coordinates */
-    struct buffer **z;   /* The text buffers */
-    size_t zs;           /* Number of text buffers */
-    size_t za = 0;       /* The index of the active text buffer */
-    struct buffer *cl;   /* Command line buffer */
-    int cla = 0;         /* Command line buffer is active */
+    int ret = 0;           /* Editor's return value */
+    int running = 1;       /* Editor is running */
+    size_t h, w;           /* Screen height and width */
+    size_t cy, cx;         /* Cursor's screen coordinates */
+    struct tb *z;          /* The text buffers */
+    struct buffer *cl = NULL; /* Command line buffer */
+    int cla = 0;           /* Command line buffer is active */
     /* Operation for which the command line is being used */
     char operation = '\0';
-    char *cl_str = NULL; /* Command line buffer converted to a string */
+    char *cl_str = NULL;   /* Command line buffer converted to a string */
     /* Bad character table for the Quick Search algorithm */
     size_t bad[UCHAR_MAX + 1];
-    struct mem *se;      /* Search memory */
-    struct mem *p;       /* Paste memory */
-    int cr = 0;          /* Command return value */
-    struct buffer *cb;   /* Shortcut to the cursor's buffer */
-    char *ns = NULL;     /* Next screen (virtual) */
-    char *cs = NULL;     /* Current screen (virtual) */
-    size_t ss = 0;       /* Screen size (virtual) */
-    size_t sa = 0;       /* Terminal screen area (real) */
-    size_t c_sa;         /* Current terminal screen area (real) */
+    struct mem *se = NULL; /* Search memory */
+    struct mem *p = NULL;  /* Paste memory */
+    int cr = 0;            /* Command return value */
+    struct buffer *cb;     /* Shortcut to the cursor's buffer */
+    char *ns = NULL;       /* Next screen (virtual) */
+    char *cs = NULL;       /* Current screen (virtual) */
+    size_t ss = 0;         /* Screen size (virtual) */
+    size_t sa = 0;         /* Terminal screen area (real) */
+    size_t c_sa;           /* Current terminal screen area (real) */
     /* Keyboard keys (one physical key can send multiple) */
     int key1, key2;
-    int digit;           /* Numerical digit */
-    size_t mult;         /* Command multiplier */
-    char *t;             /* Temporary pointer */
-    size_t i;            /* Generic index */
-    struct _stat64 st;   /* For stat calls */
+    int digit;             /* Numerical digit */
+    size_t mult;           /* Command multiplier */
+    char *t;               /* Temporary pointer */
+    size_t i;              /* Generic index */
 
     /* Ignore interrupt, sent by ^C */
     if (signal(SIGINT, SIG_IGN) == SIG_ERR) return 1;
@@ -815,25 +887,17 @@ int main(int argc, char **argv)
     /* Process command line arguments */
     if (argc > SIZE_MAX) return 1;
     if (argc > 1) {
-        zs = argc - 1;
-        if ((z = malloc(zs * sizeof(struct buffer *))) == NULL) return 1;
-        for (i = 0; i < zs; ++i) {
-            if (!_stat64(*(argv + i + 1), &st)) {
-                if (!((st.st_mode & _S_IFMT) == _S_IFREG)
-                    || st.st_size > SIZE_MAX || st.st_size < 0) QUIT(1);
-                if ((*(z + i) = init_buffer((size_t) st.st_size)) == NULL) QUIT(1);
-                if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
-                if (insert_file(*(z + i), (*(z + i))->fn)) QUIT(1);
-            } else {
-                if ((*(z + i) = init_buffer(0)) == NULL) QUIT(1);
-                if (rename_buffer(*(z + i), *(argv + i + 1))) QUIT(1);
-            }
-        }
+        if ((z = init_tb(argc - 1)) == NULL) return 1;
+        /* Load files into buffers */
+        for (i = 0; i < (size_t) (argc - 1); ++i) if (new_buffer(z, *(argv + i + 1)))
+            QUIT(1);
+        z->a = 0; /* Go back to first buffer */
     } else {
-        zs = 1;
-        if ((z = malloc(sizeof(struct buffer *))) == NULL) return 1;
-        if ((*z = init_buffer(0)) == NULL) QUIT(1);
+        if ((z = init_tb(1)) == NULL) return 1;
+        /* Start empty buffer */
+        if (new_buffer(z, NULL)) QUIT(1);
     }
+
     /* Initialise command line buffer */
     if ((cl = init_buffer(0)) == NULL) QUIT(1);
     /* Initialise search memory */
@@ -878,9 +942,9 @@ top_of_editor_loop:
                 CLEAR_SCREEN();
             }
 
-            draw_screen(*(z + za), cl, cla, cr, h, w, ns, sa, &cy, &cx);
+            draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx);
             diff_draw(ns, cs, sa, w);
-            printf("\033[%d;%dH", cy + 1, cx + 1);
+            printf("\033[%zu;%zuH", cy + 1, cx + 1);
             /* Swap virtual screens */
             t = cs;
             cs = ns;
@@ -888,7 +952,7 @@ top_of_editor_loop:
         }
 
         /* Shortcut to the cursor's buffer */
-        cb = cla ? cl : *(z + za);
+        cb = cla ? cl : *(z->z + z->a);
 
         key1 = _getch();
 
@@ -942,13 +1006,13 @@ top_of_editor_loop:
                     cla = 0;
                     if (operation == 'R') {
                         if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
-                        cr = rename_buffer(*(z + za), cl_str); break;
+                        cr = rename_buffer(*(z->z + z->a), cl_str); break;
                     } else if (operation == 'S') {
                         if (buffer_to_mem(cl, se)) {cr = 1; break;}
                         if (se->u > 1) {
                             set_bad(bad, se);
                         }
-                        cr = search(*(z + za), se, bad); break;
+                        cr = search(*(z->z + z->a), se, bad); break;
                     }
                     operation = '\0';
                 } else {
@@ -965,7 +1029,7 @@ top_of_editor_loop:
 clean_up:
     CLEAR_SCREEN();
     free_buffer(cl);
-    for (i = 0; i < zs; ++i) free_buffer(*(z + i));
+    free_tb(z);
     free_mem(se);
     free_mem(p);
     free(ns);
