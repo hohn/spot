@@ -42,6 +42,13 @@
 #include <string.h>
 #include <signal.h>
 
+/* For stat */
+#ifndef _WIN32
+#define _stat64 stat
+#define _S_IFMT S_IFMT
+#define _S_IFREG S_IFREG
+#endif
+
 /*
  * Default gap size. Must be at least 1.
  * It is good to set small while testing, but BUFSIZ is a sensible choice for
