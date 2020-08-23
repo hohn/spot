@@ -42,8 +42,11 @@
 #include <string.h>
 #include <signal.h>
 
-/* For stat */
 #ifndef _WIN32
+#include <termios.h>
+#define _getch getchar
+
+/* For stat */
 #define _stat64 stat
 #define _S_IFMT S_IFMT
 #define _S_IFREG S_IFREG
@@ -897,6 +900,15 @@ int main(int argc, char **argv)
     size_t mult;           /* Command multiplier */
     char *t;               /* Temporary pointer */
     size_t i;              /* Generic index */
+#ifndef _WIN32
+    /* Set terminal to raw input (instead of line buffering) */
+    struct termios term_orig, term_raw;
+    if (tcgetattr(STDIN_FILENO, &term_orig)) return 1;
+    term_raw = term_orig;
+    term_raw.c_lflag &= ~ICANON; /* Raw input */
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_raw)) return 1;
+#endif
+
 
     /* Ignore interrupt, sent by ^C */
     if (signal(SIGINT, SIG_IGN) == SIG_ERR) return 1;
@@ -1045,6 +1057,7 @@ top_of_editor_loop:
 
 clean_up:
     CLEAR_SCREEN();
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_orig)) ret = 1;
     free_buffer(cl);
     free_tb(z);
     free_mem(se);
