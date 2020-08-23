@@ -20,7 +20,12 @@
  */
 
 #ifdef __linux__
+#define _DEFAULT_SOURCE
 #include <sys/types.h>
+#endif
+
+#ifndef _WIN32
+#include <sys/ioctl.h>
 #endif
 
 #include <sys/stat.h>
@@ -171,7 +176,7 @@ int search(struct buffer *b, struct mem *se, size_t *bad)
      * Forward search, excludes cursor and EOBCH.
      * Uses the Quick Search algorithm.
      */
-    unsigned char *q, *stop, *q_copy, *pat;
+    char *q, *stop, *q_copy, *pat;
     size_t patlen;
     int found = 0;
     if (!se->u || b->e - b->c <= 1) return 1;
@@ -194,7 +199,7 @@ int search(struct buffer *b, struct mem *se, size_t *bad)
             /* Match found */
             if (!patlen) {found = 1; break;}
             /* Jump using the bad character table */
-            q += *(bad + *(q + se->u));
+            q += *(bad + (unsigned char) *(q + se->u));
         }
         if (!found) return 1;
     }
@@ -356,8 +361,7 @@ int insert_file(struct buffer *b, char *fn)
     size_t fs;
     FILE *fp;
     if (_stat64(fn, &st)) return 1;
-    if (!((st.st_mode & _S_IFMT) == _S_IFREG)
-        || st.st_size > SIZE_MAX || st.st_size < 0) return 1;
+    if (!((st.st_mode & _S_IFMT) == _S_IFREG) || st.st_size < 0) return 1;
     if (!st.st_size) return 0;
     fs = (size_t) st.st_size;
     if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
@@ -544,10 +548,11 @@ int setup_graphics(void)
 }
 #endif
 
-#ifdef _WIN32
+
 int get_screen_size(size_t *height, size_t *width)
 {
-    /* Gets the screen size in Windows */
+    /* Gets the screen size */
+#ifdef _WIN32
     HANDLE out;
     CONSOLE_SCREEN_BUFFER_INFO info;
     if ((out = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE) return 1;
@@ -555,8 +560,15 @@ int get_screen_size(size_t *height, size_t *width)
     *height = info.srWindow.Bottom - info.srWindow.Top + 1;
     *width = info.srWindow.Right - info.srWindow.Left + 1;
     return 0;
-}
+#else
+    struct winsize *ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) return 1;
+    *height = ws.ws_row;
+    *width = ws.ws_col;
+    return 0;
 #endif
+}
+
 
 void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
 {
@@ -853,8 +865,7 @@ int new_buffer(struct tb *z, char *fn)
     b = *(z->z + z->u); /* Create shortcut */
     if (fn != NULL && !_stat64(fn, &st)) {
         /* File exists */
-        if (!((st.st_mode & _S_IFMT) == _S_IFREG)
-            || st.st_size > SIZE_MAX || st.st_size < 0) return 1;
+        if (!((st.st_mode & _S_IFMT) == _S_IFREG) || st.st_size < 0) return 1;
         if ((b = init_buffer((size_t) st.st_size)) == NULL)
             return 1;
         if (rename_buffer(b, fn)) {free_buffer(b); return 1;}
@@ -914,7 +925,6 @@ int main(int argc, char **argv)
     if (signal(SIGINT, SIG_IGN) == SIG_ERR) return 1;
 
     /* Process command line arguments */
-    if (argc > SIZE_MAX) return 1;
     if (argc > 1) {
         if ((z = init_tb(argc - 1)) == NULL) return 1;
         /* Load files into buffers */
@@ -1057,7 +1067,9 @@ top_of_editor_loop:
 
 clean_up:
     CLEAR_SCREEN();
+#ifndef _WIN32
     if (tcsetattr(STDIN_FILENO, TCSANOW, &term_orig)) ret = 1;
+#endif
     free_buffer(cl);
     free_tb(z);
     free_mem(se);
