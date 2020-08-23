@@ -179,8 +179,9 @@ int search(struct buffer *b, struct mem *se, size_t *bad)
     char *q, *stop, *q_copy, *pat;
     size_t patlen;
     int found = 0;
+    size_t s;
     if (!se->u || b->e - b->c <= 1) return 1;
-    size_t s = b->e - b->c - 1;
+    s = b->e - b->c - 1;
     if (se->u > s) return 1;
     if (se->u == 1) {
         /* Single character patterns */
@@ -561,7 +562,7 @@ int get_screen_size(size_t *height, size_t *width)
     *width = info.srWindow.Right - info.srWindow.Left + 1;
     return 0;
 #else
-    struct winsize *ws;
+    struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) return 1;
     *height = ws.ws_row;
     *width = ws.ws_col;
@@ -821,30 +822,6 @@ void diff_draw(char *ns, char *cs, size_t sa, size_t w)
             in_pos = 0;
         }
     }
-}
-
-void test_print_buffer(struct buffer *b)
-{
-    /*
-     * Prints a buffer to the terminal in a non-graphical way.
-     * Only used for testing the gap buffer memory.
-     */
-    char *q = b->a, ch;
-    printf("gi = %zu, ci = %zu, ei = %zu\n", (size_t) (b->g - b->a),
-        (size_t) (b->c - b->a), (size_t) (b->e - b->a));
-    while (q != b->g) {
-        ch = *q++;
-        putchar(isgraph(ch) || ch == ' ' || ch == '\n' ? ch : '?');
-    }
-    while (q != b->c) {
-        ch = *q++;
-        putchar('X');
-    }
-    while (q <= b->e) {
-        ch = *q++;
-        putchar(isgraph(ch) || ch == ' ' || ch == '\n' ? ch : '?');
-    }
-    putchar('\n');
 }
 
 int new_buffer(struct tb *z, char *fn)
