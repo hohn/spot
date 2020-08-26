@@ -24,33 +24,27 @@
 #include <sys/types.h>
 #endif
 
-#ifndef _WIN32
-#include <sys/ioctl.h>
-#endif
-
 #include <sys/stat.h>
-
-#ifdef __linux__
-#include <unistd.h>
-#endif
 
 #ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
+#else
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
 #endif
 
 #include <ctype.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 
 #ifndef _WIN32
-#include <termios.h>
 #define _getch getchar
-
 /* For stat */
 #define _stat64 stat
 #define _S_IFMT S_IFMT
