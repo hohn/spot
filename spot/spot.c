@@ -1025,6 +1025,9 @@ top_of_editor_loop:
         /* Remap carriage return to line feed */
         if (key1 == '\r') key1 = '\n';
 
+        /* Map ASCII delete to backspace */
+        if (key1 == 0x7F) key1 = BKSPACE;
+
         /* Commands related to files */
         if (key1 == FILEMENU) {
             key2 = _getch();
