@@ -76,8 +76,12 @@
 
 /* Command keys */
 #define MULT 21
+#define UP 16
+#define DOWN 14
 #define LEFT 2
 #define RIGHT 6
+#define HOME 1
+#define ENDLINE 5
 #define DEL 4
 #define BKSPACE 8
 #define SETMARK 0
@@ -988,14 +992,35 @@ top_of_editor_loop:
         }
 
         /* Remap special keyboard keys */
+#ifdef _WIN32
         if (key1 == 0xE0) {
             key2 = _getch();
             switch(key2) {
+            case 'H': key1 = UP; break;
+            case 'P': key1 = DOWN; break;
             case 'K': key1 = LEFT; break;
             case 'M': key1 = RIGHT; break;
             case 'S': key1 = DEL; break;
+            case 'G': key1 = HOME; break;
+            case 'O': key1 = ENDLINE; break;
+            default: key1 = key2; break;
             }
         }
+#else
+        if (key1 == 0x1B && (key1 = _getch()) == '[') {
+            key2 = _getch();
+            switch(key2) {
+            case 'A': key1 = UP; break;
+            case 'B': key1 = DOWN; break;
+            case 'D': key1 = LEFT; break;
+            case 'C': key1 = RIGHT; break;
+            case '3': if ((key1 = _getch()) == '~') key1 = DEL; break;
+            case 'H': key1 = HOME; break;
+            case 'F': key1 = ENDLINE; break;
+            default: key1 = key2; break;
+            }
+        }
+#endif
 
         /* Remap carriage return to line feed */
         if (key1 == '\r') key1 = '\n';
