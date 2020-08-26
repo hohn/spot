@@ -57,6 +57,13 @@
 #define _S_IFREG S_IFREG
 #endif
 
+/* printf format string to move the cursor */
+#ifdef _WIN32
+#define MOVESTR "\033[%zu;%zuH"
+#else
+#define MOVESTR "\033[%lu;%luH"
+#endif
+
 /*
  * Default gap size. Must be at least 1.
  * It is good to set small while testing, but BUFSIZ is a sensible choice for
@@ -814,7 +821,7 @@ void diff_draw(char *ns, char *cs, size_t sa, size_t w)
         if ((ch = *(ns + v)) != *(cs + v)) {
             if (!in_pos) {
                 /* Move cursor: top left corner is (1, 1) not (0, 0) so need to add one */
-                printf("\033[%zu;%zuH", v / w + 1, v - (v / w) * w + 1);
+                printf(MOVESTR, v / w + 1, v - (v / w) * w + 1);
                 in_pos = 1;
             }
             putchar(ch);
@@ -889,12 +896,13 @@ int main(int argc, char **argv)
     char *t;               /* Temporary pointer */
     size_t i;              /* Generic index */
 #ifndef _WIN32
-    /* Set terminal to raw input (instead of line buffering) */
-    struct termios term_orig, term_raw;
+    /* Change terminal input to raw and no echo */
+    struct termios term_orig, term_new;
     if (tcgetattr(STDIN_FILENO, &term_orig)) return 1;
-    term_raw = term_orig;
-    term_raw.c_lflag &= ~ICANON; /* Raw input */
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_raw)) return 1;
+    term_new = term_orig;
+    term_new.c_lflag &= ~ICANON; /* Raw input (no line buffering) */
+    term_new.c_lflag &= ~ECHO;   /* No echoing of input */
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new)) return 1;
 #endif
 
 
@@ -960,7 +968,7 @@ top_of_editor_loop:
 
             draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx);
             diff_draw(ns, cs, sa, w);
-            printf("\033[%zu;%zuH", cy + 1, cx + 1);
+            printf(MOVESTR, cy + 1, cx + 1);
             /* Swap virtual screens */
             t = cs;
             cs = ns;
