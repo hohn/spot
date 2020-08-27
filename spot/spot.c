@@ -103,6 +103,12 @@
 #define CLEAR_SCREEN() printf("\033[2J")
 #define CLEAR_LINE() printf("\033[2K")
 
+/* One character movements with no out of bounds checking */
+/* Left */
+#define LCH() (*--b->c = *--b->g)
+/* Right */
+#define RCH() (*b->g++ = *b->c++)
+
 /*
  * Sets the return value for the text editor and jumps to the clean up.
  * Only use in main.
@@ -164,6 +170,16 @@ int move_right(struct buffer *b, size_t mult)
     b->g += mult;
     b->c += mult;
     return 0;
+}
+
+void start_of_line(struct buffer *b)
+{
+    while (b->g != b->a && *(b->g - 1) != '\n') LCH();
+}
+
+void end_of_line(struct buffer *b)
+{
+    while (*b->c != '\n' && b->c != b->e) RCH();
 }
 
 void set_bad(size_t *bad, struct mem *se)
@@ -1040,6 +1056,8 @@ top_of_editor_loop:
             switch(key1) {
             case LEFT: cr = move_left(cb, mult); break;
             case RIGHT: cr = move_right(cb, mult); break;
+            case HOME: start_of_line(cb); break;
+            case ENDLINE: end_of_line(cb); break;
             case DEL: cr = delete_char(cb, mult); break;
             case BKSPACE: cr = backspace_char(cb, mult); break;
             case SETMARK: set_mark(cb); break;
