@@ -90,8 +90,12 @@
 #define PASTE 25
 #define SEARCH 19
 
-/* File commands */
-#define FILEMENU 24
+/* Enter the submenu key */
+#define SUBMENU 24
+
+/* Submenu command keys */
+#define STARTBUF 1
+#define ENDBUF 5
 #define SAVE 19
 #define RENAME 18
 
@@ -170,6 +174,18 @@ int move_right(struct buffer *b, size_t mult)
     b->g += mult;
     b->c += mult;
     return 0;
+}
+
+void start_of_buffer(struct buffer *b)
+{
+    /* No need to check return value, as only fails if out of bounds */
+    move_left(b, b->g - b->a);
+}
+
+void end_of_buffer(struct buffer *b)
+{
+    /* No need to check return value, as only fails if out of bounds */
+    move_right(b, b->e - b->c);
 }
 
 void start_of_line(struct buffer *b)
@@ -1044,15 +1060,15 @@ top_of_editor_loop:
         /* Map ASCII delete to backspace */
         if (key1 == 0x7F) key1 = BKSPACE;
 
-        /* Commands related to files */
-        if (key1 == FILEMENU) {
+        if (key1 == SUBMENU) {
             key2 = _getch();
             switch (key2) {
+            case STARTBUF: start_of_buffer(cb); break;
+            case ENDBUF: end_of_buffer(cb); break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case RENAME: cla = 1; operation = 'R'; break;
             }
         } else {
-            /* Non-file related commands */
             switch(key1) {
             case LEFT: cr = move_left(cb, mult); break;
             case RIGHT: cr = move_right(cb, mult); break;
