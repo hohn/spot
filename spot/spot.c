@@ -21,9 +21,9 @@
 
 #ifdef __linux__
 #define _DEFAULT_SOURCE
-#include <sys/types.h>
 #endif
 
+#include <sys/types.h>
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -45,10 +45,6 @@
 
 #ifndef _WIN32
 #define _getch getchar
-/* For stat */
-#define _stat64 stat
-#define _S_IFMT S_IFMT
-#define _S_IFREG S_IFREG
 #endif
 
 /* printf format string to move the cursor */
@@ -395,11 +391,11 @@ int insert_file(struct buffer *b, char *fn)
      * Inserts a file into the right-hand side of the old gap, so that the
      * inserted text will appear after the new cursor position.
      */
-    struct _stat64 st;
+    struct stat st;
     size_t fs;
     FILE *fp;
-    if (_stat64(fn, &st)) return 1;
-    if (!((st.st_mode & _S_IFMT) == _S_IFREG) || st.st_size < 0) return 1;
+    if (stat(fn, &st)) return 1;
+    if (!((st.st_mode & S_IFMT) == S_IFREG) || st.st_size < 0) return 1;
     if (!st.st_size) return 0;
     fs = (size_t) st.st_size;
     if (fs > (size_t) (b->c - b->g)) if (grow_gap(b, fs)) return 1;
@@ -420,13 +416,13 @@ int write_buffer(struct buffer *b, char *fn)
      * Writes a buffer to file. If the file already exists, then it will be
      * renamed to have a '~' suffix (to serve as a backup).
      */
-    struct _stat64 st;
+    struct stat st;
     int backup_ok = 0;
     size_t len, num;
     char *backup_fn;
     FILE *fp;
     if (fn == NULL) return 1;
-    if (!_stat64(fn, &st) && st.st_mode & _S_IFREG) {
+    if (!stat(fn, &st) && st.st_mode & S_IFREG) {
         len = strlen(fn);
         if (AOF(len, 2)) return 1;
         if ((backup_fn = malloc(len + 2)) == NULL) return 1;
@@ -863,7 +859,7 @@ void diff_draw(char *ns, char *cs, size_t sa, size_t w)
 
 int new_buffer(struct tb *z, char *fn)
 {
-    struct _stat64 st;
+    struct stat st;
     size_t new_n;
     struct buffer **t;
     struct buffer *b;  /* Buffer shortcut */
@@ -877,9 +873,9 @@ int new_buffer(struct tb *z, char *fn)
         z->n = new_n;
     }
     b = *(z->z + z->u); /* Create shortcut */
-    if (fn != NULL && !_stat64(fn, &st)) {
+    if (fn != NULL && !stat(fn, &st)) {
         /* File exists */
-        if (!((st.st_mode & _S_IFMT) == _S_IFREG) || st.st_size < 0) return 1;
+        if (!((st.st_mode & S_IFMT) == S_IFREG) || st.st_size < 0) return 1;
         if ((b = init_buffer((size_t) st.st_size)) == NULL)
             return 1;
         if (rename_buffer(b, fn)) {free_buffer(b); return 1;}
