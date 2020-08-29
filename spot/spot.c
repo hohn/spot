@@ -87,6 +87,7 @@
 #define ENDBUF 5
 #define SAVE 19
 #define RENAME 18
+#define CLOSE 3
 
 /* size_t integer overflow tests */
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -1073,6 +1074,7 @@ top_of_editor_loop:
             case ENDBUF: end_of_buffer(cb); break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case RENAME: cla = 1; operation = 'R'; break;
+            case CLOSE: running = 0; break;
             }
         } else {
             switch(key1) {
@@ -1108,8 +1110,6 @@ top_of_editor_loop:
             default: cr = insert_char(cb, key1, mult); break;
             }
         }
-
-        if (key1 == 'q') running = 0;
     }
 
 clean_up:
