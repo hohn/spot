@@ -758,7 +758,7 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
          * is the first character on a screen line.
          */
         if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
-        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
+        else *(ns + v++) = isgraph((unsigned char) ch) || ch == ' ' ? ch : '?';
     }
     /* Record cursor's screen location */
     *cy = v / w;
@@ -768,7 +768,7 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
     while (1) {
         ch = *q;
         if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
-        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
+        else *(ns + v++) = isgraph((unsigned char) ch) || ch == ' ' ? ch : '?';
         /* Stop if have reached the status bar, before printing there */
         if (v / w == th) break;
         /* To avoid incrementing pointer outside of memory allocation */
@@ -822,7 +822,7 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
     while (q != cl->g) {
         ch = *q++;
         if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
-        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
+        else *(ns + v++) = isgraph((unsigned char) ch) || ch == ' ' ? ch : '?';
     }
     /* If the command line is active, record cursor's screen location */
     if (cla) {
@@ -834,7 +834,7 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
     while (1) {
         ch = *q;
         if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
-        else *(ns + v++) = isgraph(ch) || ch == ' ' ? ch : '?';
+        else *(ns + v++) = isgraph((unsigned char) ch) || ch == ' ' ? ch : '?';
         /* Stop if off the bottom of the screen, before printing there */
         if (v / w == h) break;
         if (q == cl->e) break;
