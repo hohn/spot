@@ -63,32 +63,61 @@
  */
 #define EOBCH '~'
 
+/* Control characters that can be used for command keys */
+#define Ca 1
+#define Cb 2
+#define Cd 4
+#define Ce 5
+#define Cf 6
+#define Cg 7
+#define Ch 8
+#define Ck 11
+#define Cl 12
+#define Cn 14
+#define Co 15
+#define Cp 16
+#define Cq 17
+#define Cr 18
+#define Cs 19
+#define Ct 20
+#define Cu 21
+#define Cv 22
+#define Cw 23
+#define Cx 24
+#define Cy 25
+
 /* Command keys */
-#define MULT 21
-#define UP 16
-#define DOWN 14
-#define LEFT 2
-#define RIGHT 6
-#define HOME 1
-#define ENDLINE 5
-#define DEL 4
-#define BKSPACE 8
-#define SETMARK 0
-#define COPY 3
-#define CUT 23
-#define PASTE 25
-#define SEARCH 19
-#define CENTRE 12
+#define MULT Cu
+#define UP Cp
+#define DOWN Cn
+#define LEFT Cb
+#define RIGHT Cf
+#define HOME Ca
+#define ENDLINE Ce
+#define DEL Cd
+#define BKSPACE Ch
+#define SETMARK Ct
+#define COPY Co
+#define CUT Cw
+#define CUTEOL Ck
+#define PASTE Cy
+#define SEARCH Cs
+#define CENTRE Cl
+#define GOTOROW Cr
+#define CLEXIT Cg
 
 /* Enter the submenu key */
-#define SUBMENU 24
+#define SUBMENU Cx
 
 /* Submenu command keys */
-#define STARTBUF 1
-#define ENDBUF 5
-#define SAVE 19
-#define RENAME 18
-#define CLOSE 3
+#define STARTBUF 'a'
+#define ENDBUF 'e'
+#define REPSEARCH 'n'
+#define TRIM 't'
+#define MATCH 'm'
+#define SAVE 'w'
+#define RENAME 'r'
+#define CLOSE 'q'
 
 /* size_t integer overflow tests */
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -1074,12 +1103,16 @@ top_of_editor_loop:
             switch (key2) {
             case STARTBUF: start_of_buffer(cb); break;
             case ENDBUF: end_of_buffer(cb); break;
+            case REPSEARCH: cr = search(cb, se, bad); break;
+            case TRIM: break;
+            case MATCH: break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case RENAME: cla = 1; operation = 'R'; break;
             case CLOSE: running = 0; break;
             }
         } else {
             switch(key1) {
+            case CLEXIT: if (cla) {cla = 0; operation = '\0';} break;
             case LEFT: cr = move_left(cb, mult); break;
             case RIGHT: cr = move_right(cb, mult); break;
             case HOME: start_of_line(cb); break;
