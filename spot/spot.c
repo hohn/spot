@@ -47,13 +47,6 @@
 #define _getch getchar
 #endif
 
-/* printf format string to move the cursor */
-#ifdef _WIN32
-#define MOVESTR "\033[%zu;%zuH"
-#else
-#define MOVESTR "\033[%lu;%luH"
-#endif
-
 /*
  * Default gap size. Must be at least 1.
  * It is good to set small while testing, but BUFSIZ is a sensible choice for
@@ -603,6 +596,22 @@ int get_screen_size(size_t *height, size_t *width)
 #endif
 }
 
+void put_z(size_t a)
+{
+    size_t b = a, m = 1;
+    while (b /= 10) m *= 10;
+    do {putchar(a / m + '0'); a %= m;} while (m /= 10);
+}
+
+void move_cursor(size_t y, size_t x)
+{
+    /* Move the graphical cursor on the screen */
+    printf("\033[");
+    put_z(y);
+    putchar(';');
+    put_z(x);
+    putchar('H');
+}
 
 void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
 {
@@ -846,8 +855,8 @@ void diff_draw(char *ns, char *cs, size_t sa, size_t w)
     for (v = 0; v < sa; ++v) {
         if ((ch = *(ns + v)) != *(cs + v)) {
             if (!in_pos) {
-                /* Move cursor: top left corner is (1, 1) not (0, 0) so need to add one */
-                printf(MOVESTR, v / w + 1, v - (v / w) * w + 1);
+                /* Top left corner is (1, 1) not (0, 0) so need to add one */
+                move_cursor(v / w + 1, v - (v / w) * w + 1);
                 in_pos = 1;
             }
             putchar(ch);
@@ -994,7 +1003,8 @@ top_of_editor_loop:
 
             draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx);
             diff_draw(ns, cs, sa, w);
-            printf(MOVESTR, cy + 1, cx + 1);
+            /* Top left corner is (1, 1) not (0, 0) so need to add one */
+            move_cursor(cy + 1, cx + 1);
             /* Swap virtual screens */
             t = cs;
             cs = ns;
