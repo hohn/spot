@@ -78,6 +78,7 @@
 #define CUT 23
 #define PASTE 25
 #define SEARCH 19
+#define CENTRE 12
 
 /* Enter the submenu key */
 #define SUBMENU 24
@@ -733,7 +734,7 @@ void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
 }
 
 int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
-    size_t w, char *ns, size_t *cy, size_t *cx)
+    size_t w, char *ns, size_t *cy, size_t *cx, int centre)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
     char *q, ch;
@@ -745,7 +746,7 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
     size_t th = h > 2 ? h - 2 : 1;
 
     /* Text buffer */
-    reverse_scan(b, th, w, 0);
+    reverse_scan(b, th, w, centre);
 
     v = 0;
     q = b->a + b->d;
@@ -904,33 +905,34 @@ int new_buffer(struct tb *z, char *fn)
 
 int main(int argc, char **argv)
 {
-    int ret = 0;           /* Editor's return value */
-    int running = 1;       /* Editor is running */
-    size_t h, w;           /* Screen height and width */
-    size_t cy, cx;         /* Cursor's screen coordinates */
-    struct tb *z;          /* The text buffers */
+    int ret = 0;              /* Editor's return value */
+    int running = 1;          /* Editor is running */
+    size_t h, w;              /* Screen height and width */
+    size_t cy, cx;            /* Cursor's screen coordinates */
+    struct tb *z;             /* The text buffers */
     struct buffer *cl = NULL; /* Command line buffer */
-    int cla = 0;           /* Command line buffer is active */
+    int cla = 0;              /* Command line buffer is active */
     /* Operation for which the command line is being used */
     char operation = '\0';
-    char *cl_str = NULL;   /* Command line buffer converted to a string */
+    char *cl_str = NULL;      /* Command line buffer converted to a string */
     /* Bad character table for the Quick Search algorithm */
     size_t bad[UCHAR_MAX + 1];
-    struct mem *se = NULL; /* Search memory */
-    struct mem *p = NULL;  /* Paste memory */
-    int cr = 0;            /* Command return value */
-    struct buffer *cb;     /* Shortcut to the cursor's buffer */
-    char *ns = NULL;       /* Next screen (virtual) */
-    char *cs = NULL;       /* Current screen (virtual) */
-    size_t ss = 0;         /* Screen size (virtual) */
-    size_t sa = 0;         /* Terminal screen area (real) */
-    size_t c_sa;           /* Current terminal screen area (real) */
+    struct mem *se = NULL;    /* Search memory */
+    struct mem *p = NULL;     /* Paste memory */
+    int cr = 0;               /* Command return value */
+    int centre = 0;           /* Request to centre the cursor */
+    struct buffer *cb;        /* Shortcut to the cursor's buffer */
+    char *ns = NULL;          /* Next screen (virtual) */
+    char *cs = NULL;          /* Current screen (virtual) */
+    size_t ss = 0;            /* Screen size (virtual) */
+    size_t sa = 0;            /* Terminal screen area (real) */
+    size_t c_sa;              /* Current terminal screen area (real) */
     /* Keyboard keys (one physical key can send multiple) */
     int key1, key2;
-    int digit;             /* Numerical digit */
-    size_t mult;           /* Command multiplier */
-    char *t;               /* Temporary pointer */
-    size_t i;              /* Generic index */
+    int digit;                /* Numerical digit */
+    size_t mult;              /* Command multiplier */
+    char *t;                  /* Temporary pointer */
+    size_t i;                 /* Generic index */
 #ifndef _WIN32
     /* Change terminal input to raw and no echo */
     struct termios term_orig, term_new;
@@ -940,7 +942,6 @@ int main(int argc, char **argv)
     term_new.c_lflag &= ~ECHO;   /* No echoing of input */
     if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new)) return 1;
 #endif
-
 
     /* Ignore interrupt, sent by ^C */
     if (signal(SIGINT, SIG_IGN) == SIG_ERR) return 1;
@@ -1002,7 +1003,8 @@ top_of_editor_loop:
                 CLEAR_SCREEN();
             }
 
-            draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx);
+            draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx, centre);
+            centre = 0; /* Clear centre request */
             diff_draw(ns, cs, sa, w);
             /* Top left corner is (1, 1) not (0, 0) so need to add one */
             move_cursor(cy + 1, cx + 1);
@@ -1089,6 +1091,7 @@ top_of_editor_loop:
             case CUT: cr = copy_region(cb, p, 1); break;
             case PASTE: cr = paste(cb, p, mult); break;
             case SEARCH: cla = 1; operation = 'S'; break;
+            case CENTRE: centre = 1; break;
             case '\n':
                 if (cla) {
                     cla = 0;
