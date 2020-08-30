@@ -63,64 +63,47 @@
  */
 #define EOBCH '~'
 
-/* Control characters that can be used for command keys */
-#define Ca 1
-#define Cb 2
-#define Cd 4
-#define Ce 5
-#define Cf 6
-#define Cg 7
-#define Ch 8
-#define Ck 11
-#define Cl 12
-#define Cn 14
-#define Co 15
-#define Cp 16
-#define Cq 17
-#define Cr 18
-#define Cs 19
-#define Ct 20
-#define Cu 21
-#define Cv 22
-#define Cw 23
-#define Cx 24
+/* Changing modes */
+#define CMDMODE '\t'
+#define INSERTMODE 'i'
 
 /* Command keys */
-#define MULT Cu
-#define UP Cp
-#define DOWN Cn
-#define LEFT Cb
-#define RIGHT Cf
-#define HOME Ca
-#define ENDLINE Ce
-#define DEL Cd
-#define BKSPACE Ch
-#define SETMARK Ct
-#define COPY Co
-#define CUT Cw
-#define CUTEOL Ck
-#define PASTE Cv
-#define SEARCH Cs
-#define CENTRE Cl
-#define GOTOROW Cr
-#define CLEXIT Cg
-
-/* Enter the submenu key */
-#define SUBMENU Cx
-
-/* Submenu command keys */
-#define STARTBUF 'a'
-#define ENDBUF 'e'
+#define UP '6'
+#define DOWN 'y'
+#define LEFT ','
+#define RIGHT '.'
+#define HOME 'a'
+#define ENDLINE 'e'
+#define DEL 'd'
+#define BKSPACE 'h'
+#define SETMARK 'm'
+#define NEWLINE 'j'
+#define COPY 'c'
+#define CUT 'x'
+#define PASTE 'p'
+#define SEARCH '/'
+#define CENTRE 'l'
+#define CLEXIT 'g'
+#define CLEXEC '`'
+#define STARTBUF '['
+#define ENDBUF ']'
 #define REPSEARCH 'n'
 #define TRIM 't'
-#define MATCH 'm'
+#define MATCHBRACE 'b'
 #define SAVE 'w'
 #define RENAME 'r'
+#define INSERTFILE
+#define LEFTBUF '-'
+#define RIGHTBUF '='
+#define NEWBUF 'o'
 #define CLOSE 'q'
 
 /* size_t integer overflow tests */
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
+
+/* ASCII test for unsigned input that could be larger than UCHAR_MAX */
+#define ISASCII(a) ((a) >= 0 && (a) <= 127)
 
 /* ANSI escape sequences */
 #define CLEAR_SCREEN() printf("\033[2J")
@@ -955,8 +938,9 @@ int main(int argc, char **argv)
     size_t ss = 0;            /* Screen size (virtual) */
     size_t sa = 0;            /* Terminal screen area (real) */
     size_t c_sa;              /* Current terminal screen area (real) */
-    /* Keyboard keys (one physical key can send multiple) */
-    int key1, key2;
+    /* Keyboard key (one physical key can send multiple) */
+    int key;
+    int cmd_mode = 1;         /* Command mode indicator */
     int digit;                /* Numerical digit */
     size_t mult;              /* Command multiplier */
     char *t;                  /* Temporary pointer */
@@ -1001,8 +985,8 @@ int main(int argc, char **argv)
     /* Editor loop */
     while (running) {
 
-top_of_editor_loop:
-
+/* Top of the editor loop */
+top:
         if (get_screen_size(&h, &w)) QUIT(1);
 
         /* Do graphics only if screen is big enough */
@@ -1045,72 +1029,28 @@ top_of_editor_loop:
         /* Shortcut to the cursor's buffer */
         cb = cla ? cl : *(z->z + z->a);
 
-        key1 = _getch();
-
-        mult = 1; /* Default is to perform a command once */
-        /* Read multiplier number */
-        if (key1 == MULT) {
+        /* Read keys to get commands */
+        if (cmd_mode) {
+            /* Read multiplier number */
             mult = 0;
-            while (isdigit(key1 = _getch())) {
-                if (MOF(mult, 10)) {cr = 1; goto top_of_editor_loop;}
+            while (isdigit(key = _getch())) {
+                if (MOF(mult, 10)) {cr = 1; goto top;}
                 mult *= 10;
-                digit = key1 - '0';
-                if (AOF(mult, digit)) {cr = 1; goto top_of_editor_loop;}
+                digit = key - '0';
+                if (AOF(mult, digit)) {cr = 1; goto top;}
                 mult += digit;
             }
-        }
+            if (!mult) mult = 1; /* Default is to perform a command once */
 
-        /* Remap special keyboard keys */
-#ifdef _WIN32
-        if (key1 == 0xE0) {
-            key2 = _getch();
-            switch(key2) {
-            case 'H': key1 = UP; break;
-            case 'P': key1 = DOWN; break;
-            case 'K': key1 = LEFT; break;
-            case 'M': key1 = RIGHT; break;
-            case 'S': key1 = DEL; break;
-            case 'G': key1 = HOME; break;
-            case 'O': key1 = ENDLINE; break;
-            default: key1 = key2; break;
-            }
-        }
-#else
-        if (key1 == 0x1B && (key1 = _getch()) == '[') {
-            key2 = _getch();
-            switch(key2) {
-            case 'A': key1 = UP; break;
-            case 'B': key1 = DOWN; break;
-            case 'D': key1 = LEFT; break;
-            case 'C': key1 = RIGHT; break;
-            case '3': if ((key1 = _getch()) == '~') key1 = DEL; break;
-            case 'H': key1 = HOME; break;
-            case 'F': key1 = ENDLINE; break;
-            default: key1 = key2; break;
-            }
-        }
-#endif
-
-        /* Remap carriage return to line feed */
-        if (key1 == '\r') key1 = '\n';
-
-        /* Map ASCII delete to backspace */
-        if (key1 == 0x7F) key1 = BKSPACE;
-
-        if (key1 == SUBMENU) {
-            key2 = _getch();
-            switch (key2) {
+            switch (key) {
             case STARTBUF: start_of_buffer(cb); break;
             case ENDBUF: end_of_buffer(cb); break;
             case REPSEARCH: cr = search(cb, se, bad); break;
             case TRIM: break;
-            case MATCH: break;
+            case MATCHBRACE: break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case RENAME: cla = 1; operation = 'R'; break;
             case CLOSE: running = 0; break;
-            }
-        } else {
-            switch(key1) {
             case CLEXIT: if (cla) {cla = 0; operation = '\0';} break;
             case LEFT: cr = move_left(cb, mult); break;
             case RIGHT: cr = move_right(cb, mult); break;
@@ -1124,26 +1064,33 @@ top_of_editor_loop:
             case PASTE: cr = paste(cb, p, mult); break;
             case SEARCH: cla = 1; operation = 'S'; break;
             case CENTRE: centre = 1; break;
-            case '\n':
+            case INSERTMODE: cmd_mode = 0; break;
+            case NEWLINE: cr = insert_char(cb, '\n', mult); break;
+            case CLEXEC:
                 if (cla) {
                     cla = 0;
                     if (operation == 'R') {
                         if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
-                        cr = rename_buffer(*(z->z + z->a), cl_str); break;
+                        cr = rename_buffer(*(z->z + z->a), cl_str);
                     } else if (operation == 'S') {
                         if (buffer_to_mem(cl, se)) {cr = 1; break;}
                         if (se->u > 1) {
                             set_bad(bad, se);
                         }
-                        cr = search(*(z->z + z->a), se, bad); break;
+                        cr = search(*(z->z + z->a), se, bad);
                     }
                     operation = '\0';
-                } else {
-                    cr = insert_char(cb, key1, mult);
                 }
                 break;
-            default: cr = insert_char(cb, key1, mult); break;
             }
+        } else {
+            if ((key = _getch()) == CMDMODE) {cmd_mode = 1; goto top;}
+            /* Remap carriage return to line feed */
+            if (key == '\r') key = '\n';
+            if (ISASCII((unsigned int) key)
+                && (isgraph((unsigned char) key) || key == ' ' || key == '\n'))
+                cr = insert_char(cb, key, mult);
+            mult = 1; /* Reset command multiplier */
         }
     }
 
