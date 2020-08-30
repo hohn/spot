@@ -84,7 +84,6 @@
 #define Cv 22
 #define Cw 23
 #define Cx 24
-#define Cy 25
 
 /* Command keys */
 #define MULT Cu
@@ -100,7 +99,7 @@
 #define COPY Co
 #define CUT Cw
 #define CUTEOL Ck
-#define PASTE Cy
+#define PASTE Cv
 #define SEARCH Cs
 #define CENTRE Cl
 #define GOTOROW Cr
