@@ -32,6 +32,7 @@
 #include <io.h>
 #else
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -620,6 +621,18 @@ int paste(struct buffer *b, struct mem *p, size_t mult)
     return 0;
 }
 
+int sys_cmd(char *cmd)
+{
+    int r;
+    if ((r = system(cmd)) == -1) return 1;
+#ifdef _WIN32
+    if (!r) return 0;
+#else
+    if (WIFEXITED(r) && !WEXITSTATUS(r)) return 0;
+#endif
+    return 1;
+}
+
 #ifdef _WIN32
 int setup_graphics(void)
 {
@@ -1158,6 +1171,7 @@ clean_up:
     free_tb(z);
     free_mem(se);
     free_mem(p);
+    free(cl_str);
     free(ns);
     free(cs);
 
