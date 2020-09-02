@@ -29,6 +29,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
+#include <io.h>
 #else
 #include <sys/ioctl.h>
 #include <termios.h>
@@ -43,8 +44,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef _WIN32
-#define _getch getchar
+#ifdef _WIN32
+#define GETCH() (term_in ? _getch() : getchar())
+#else
+#define GETCH() getchar()
 #endif
 
 /*
@@ -103,7 +106,7 @@
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
 
 /* ASCII test for unsigned input that could be larger than UCHAR_MAX */
-#define ISASCII(a) ((a) >= 0 && (a) <= 127)
+#define ISASCII(u) ((u) <= 127)
 
 /* ANSI escape sequences */
 #define CLEAR_SCREEN() printf("\033[2J")
@@ -778,16 +781,14 @@ int draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr, size_t h,
     *cx = v % w;
     q = b->c;
     /* Print after the gap */
-    while (1) {
+    do {
         ch = *q;
         if (ch == '\n') do {*(ns + v++) = ' ';} while (v % w);
         else *(ns + v++) = isgraph((unsigned char) ch) || ch == ' ' ? ch : '?';
         /* Stop if have reached the status bar, before printing there */
         if (v / w == th) break;
-        /* To avoid incrementing pointer outside of memory allocation */
-        if (q == b->e) break;
-        ++q;
-    }
+    } while (q++ != b->e);
+
     /* Fill in unused text region with spaces */
     while (v / w != th) *(ns + v++) = ' ';
 
@@ -942,21 +943,34 @@ int main(int argc, char **argv)
     int key;
     int cmd_mode = 1;         /* Command mode indicator */
     int digit;                /* Numerical digit */
+    int term_in = 0;          /* Terminal input */
     size_t mult;              /* Command multiplier */
     char *t;                  /* Temporary pointer */
     size_t i;                 /* Generic index */
 #ifndef _WIN32
-    /* Change terminal input to raw and no echo */
     struct termios term_orig, term_new;
-    if (tcgetattr(STDIN_FILENO, &term_orig)) return 1;
-    term_new = term_orig;
-    term_new.c_lflag &= ~ICANON; /* Raw input (no line buffering) */
-    term_new.c_lflag &= ~ECHO;   /* No echoing of input */
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new)) return 1;
 #endif
 
     /* Ignore interrupt, sent by ^C */
     if (signal(SIGINT, SIG_IGN) == SIG_ERR) return 1;
+
+    /* See if input is from a terminal */
+#ifdef _WIN32
+    if (_isatty(_fileno(stdin))) term_in = 1;
+#else
+    if (isatty(STDIN_FILENO)) term_in = 1;
+#endif
+
+#ifndef _WIN32
+    if (term_in) {
+        /* Change terminal input to raw and no echo */
+        if (tcgetattr(STDIN_FILENO, &term_orig)) return 1;
+        term_new = term_orig;
+        term_new.c_lflag &= ~ICANON; /* Raw input (no line buffering) */
+        term_new.c_lflag &= ~ECHO;   /* No echoing of input */
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new)) return 1;
+    }
+#endif
 
     /* Process command line arguments */
     if (argc > 1) {
@@ -1033,7 +1047,7 @@ top:
         if (cmd_mode) {
             /* Read multiplier number */
             mult = 0;
-            while (isdigit(key = _getch())) {
+            while (isdigit(key = GETCH())) {
                 if (MOF(mult, 10)) {cr = 1; goto top;}
                 mult *= 10;
                 digit = key - '0';
@@ -1084,7 +1098,7 @@ top:
                 break;
             }
         } else {
-            if ((key = _getch()) == CMDMODE) {cmd_mode = 1; goto top;}
+            if ((key = GETCH()) == CMDMODE) {cmd_mode = 1; goto top;}
             /* Remap carriage return to line feed */
             if (key == '\r') key = '\n';
             if (ISASCII((unsigned int) key)
@@ -1097,7 +1111,7 @@ top:
 clean_up:
     CLEAR_SCREEN();
 #ifndef _WIN32
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_orig)) ret = 1;
+    if (term_in && tcsetattr(STDIN_FILENO, TCSANOW, &term_orig)) ret = 1;
 #endif
     free_buffer(cl);
     free_tb(z);
