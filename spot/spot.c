@@ -203,6 +203,47 @@ void end_of_line(struct buffer *b)
     while (*b->c != '\n' && b->c != b->e) RCH();
 }
 
+int match_brace(struct buffer *b)
+{
+    size_t depth = 1; /* Depth inside nested braces */
+    char orig = *b->c, target, *q;
+    int right; /* Movement direction */
+    if (b->c == b->e) return 0; /* Cannot match EOBCH */
+    switch (orig) {
+        case '(': target = ')'; right = 1; break;
+        case '<': target = '>'; right = 1; break;
+        case '[': target = ']'; right = 1; break;
+        case '{': target = '}'; right = 1; break;
+        case ')': target = '('; right = 0; break;
+        case '>': target = '<'; right = 0; break;
+        case ']': target = '['; right = 0; break;
+        case '}': target = '{'; right = 0; break;
+        default: return 0; /* Nothing to match */
+    }
+    if (right) {
+        q = b->c + 1;
+        while (q != b->e) {
+            if (*q == target) --depth;
+            else if (*q == orig) ++depth;
+            if (!depth) break;
+            ++q;
+        }
+        if (!depth) {move_right(b, q - b->c); return 0;}
+        return 1; /* Match not found */
+    }
+    /* Left */
+    if (b->g == b->a) return 1; /* Cannot move left */
+    q = b->g - 1;
+    while (1) {
+        if (*q == target) --depth;
+        else if (*q == orig) ++depth;
+        if (!depth || q == b->a) break;
+        --q;
+    }
+    if (!depth) {move_left(b, b->g - q); return 0;}
+    return 1; /* Match not found */
+}
+
 void set_bad(size_t *bad, struct mem *se)
 {
     /* Sets the bad character table for the Quick Search algorithm */
@@ -1061,7 +1102,7 @@ top:
             case ENDBUF: end_of_buffer(cb); break;
             case REPSEARCH: cr = search(cb, se, bad); break;
             case TRIM: break;
-            case MATCHBRACE: break;
+            case MATCHBRACE: cr = match_brace(cb); break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case RENAME: cla = 1; operation = 'R'; break;
             case CLOSE: running = 0; break;
