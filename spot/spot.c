@@ -72,35 +72,41 @@
 #define INSERTMODE 'i'
 
 /* Command keys */
-#define UP '6'
-#define DOWN 'y'
-#define LEFT ','
-#define RIGHT '.'
+#define UP 'p'
+#define DOWN 'n'
+#define LEFT 'b'
+#define RIGHT 'f'
 #define HOME 'a'
 #define ENDLINE 'e'
 #define DEL 'd'
 #define BKSPACE 'h'
 #define SETMARK 'm'
 #define NEWLINE 'j'
-#define COPY 'c'
-#define CUT 'x'
-#define PASTE 'p'
-#define SEARCH '/'
+#define COPY 'W'
+#define CUT 'w'
+#define PASTE 'y'
+#define SEARCH 's'
+#define REPSEARCH '/'
 #define CENTRE 'l'
+#define REDRAW 'L'
 #define CLEXIT 'g'
-#define CLEXEC '`'
-#define STARTBUF '['
-#define ENDBUF ']'
-#define REPSEARCH 'n'
-#define TRIM 't'
-#define MATCHBRACE 'b'
-#define SAVE 'w'
-#define RENAME 'r'
-#define INSERTFILE
-#define LEFTBUF '-'
-#define RIGHTBUF '='
+#define CLEXEC 'z'
+#define STARTBUF '<'
+#define ENDBUF '>'
+#define TRIMWS 't'
+#define CLEAN 'T'
+#define MATCHBRACE 'M'
+#define SAVE 'S'
+#define RENAME 'N'
+#define INSERTFILE 'i'
 #define NEWBUF 'o'
-#define CLOSE 'q'
+#define LEFTBUF '['
+#define RIGHTBUF ']'
+#define CLOSE 'C'
+#define REGEXREG 'r'
+#define REGEXALL 'R'
+#define SHELLCMD 'x'
+#define INSERTHEX 'q'
 
 /* size_t integer overflow tests */
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -995,6 +1001,7 @@ int main(int argc, char **argv)
     size_t c_sa;              /* Current terminal screen area (real) */
     /* Keyboard key (one physical key can send multiple) */
     int key;
+    int sk;                   /* Special key indicator */
     int cmd_mode = 1;         /* Command mode indicator */
     int digit;                /* Numerical digit */
     int term_in = 0;          /* Terminal input */
@@ -1097,35 +1104,85 @@ top:
         /* Shortcut to the cursor's buffer */
         cb = cla ? cl : *(z->z + z->a);
 
-        /* Read keys to get commands */
+        key = GETCH(); /* Get the first key */
+
+        mult = 1; /* Reset command multiplier */
         if (cmd_mode) {
             /* Read multiplier number */
             mult = 0;
-            while (isdigit(key = GETCH())) {
+            while (isdigit(key)) {
                 if (MOF(mult, 10)) {cr = 1; goto top;}
                 mult *= 10;
                 digit = key - '0';
                 if (AOF(mult, digit)) {cr = 1; goto top;}
                 mult += digit;
+                key = GETCH();
             }
             if (!mult) mult = 1; /* Default is to perform a command once */
+        }
 
+        sk = 0; /* Clear special key indicator */
+
+        /* Remap special keyboard keys */
+#ifdef _WIN32
+        if (key == 0xE0) {
+            key = _getch();
+            switch(key) {
+            case 'H': key = UP; sk = 1; break;
+            case 'P': key = DOWN; sk = 1; break;
+            case 'K': key = LEFT; sk = 1; break;
+            case 'M': key = RIGHT; sk = 1; break;
+            case 'S': key = DEL; sk = 1; break;
+            case 'G': key = HOME; sk = 1; break;
+            case 'O': key = ENDLINE; sk = 1; break;
+            }
+        }
+#else
+        if (key == 0x1B && (key = _getch()) == '[') {
+            key = _getch();
+            switch(key) {
+            case 'A': key = UP; sk = 1; break;
+            case 'B': key = DOWN; sk = 1; break;
+            case 'D': key = LEFT; sk = 1; break;
+            case 'C': key = RIGHT; sk = 1; break;
+            case '3': if ((key = _getch()) == '~') key = DEL; sk = 1; break;
+            case 'H': key = HOME; sk = 1; break;
+            case 'F': key = ENDLINE; sk = 1; break;
+            }
+        }
+#endif
+
+        /* Remap Backspace key */
+        if (key == 8 || key == 0x7F) {key = BKSPACE; sk = 1;}
+
+        /* Remap Enter key */
+        if (key == '\n' || key == '\r') {key = NEWLINE; sk = 1;}
+
+        /* Special keys work in command mode and insert mode */
+        if (cmd_mode || sk) {
+            switch (key) {
+            case LEFT: cr = move_left(cb, mult); goto top;
+            case RIGHT: cr = move_right(cb, mult); goto top;
+            case HOME: start_of_line(cb); goto top;
+            case ENDLINE: end_of_line(cb); goto top;
+            case DEL: cr = delete_char(cb, mult); goto top;
+            case BKSPACE: cr = backspace_char(cb, mult); goto top;
+            case NEWLINE: cr = insert_char(cb, '\n', mult); goto top;
+            }
+        }
+
+        /* Command mode only */
+        if (cmd_mode) {
             switch (key) {
             case STARTBUF: start_of_buffer(cb); break;
             case ENDBUF: end_of_buffer(cb); break;
             case REPSEARCH: cr = search(cb, se, bad); break;
-            case TRIM: break;
+            case TRIMWS: break;
             case MATCHBRACE: cr = match_brace(cb); break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case RENAME: cla = 1; operation = 'R'; break;
             case CLOSE: running = 0; break;
             case CLEXIT: if (cla) {cla = 0; operation = '\0';} break;
-            case LEFT: cr = move_left(cb, mult); break;
-            case RIGHT: cr = move_right(cb, mult); break;
-            case HOME: start_of_line(cb); break;
-            case ENDLINE: end_of_line(cb); break;
-            case DEL: cr = delete_char(cb, mult); break;
-            case BKSPACE: cr = backspace_char(cb, mult); break;
             case SETMARK: set_mark(cb); break;
             case COPY: cr = copy_region(cb, p, 0); break;
             case CUT: cr = copy_region(cb, p, 1); break;
@@ -1133,7 +1190,6 @@ top:
             case SEARCH: cla = 1; operation = 'S'; break;
             case CENTRE: centre = 1; break;
             case INSERTMODE: cmd_mode = 0; break;
-            case NEWLINE: cr = insert_char(cb, '\n', mult); break;
             case CLEXEC:
                 if (cla) {
                     cla = 0;
@@ -1152,13 +1208,11 @@ top:
                 break;
             }
         } else {
-            if ((key = GETCH()) == CMDMODE) {cmd_mode = 1; goto top;}
-            /* Remap carriage return to line feed */
-            if (key == '\r') key = '\n';
+            /* Insert mode only */
+            if (key == CMDMODE) {cmd_mode = 1; goto top;}
             if (ISASCII((unsigned int) key)
-                && (isgraph((unsigned char) key) || key == ' ' || key == '\n'))
+                && (isgraph((unsigned char) key) || key == ' '))
                 cr = insert_char(cb, key, mult);
-            mult = 1; /* Reset command multiplier */
         }
     }
 
