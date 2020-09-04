@@ -1126,7 +1126,7 @@ top:
         /* Remap special keyboard keys */
 #ifdef _WIN32
         if (key == 0xE0) {
-            key = _getch();
+            key = GETCH();
             switch(key) {
             case 'H': key = UP; sk = 1; break;
             case 'P': key = DOWN; sk = 1; break;
@@ -1138,14 +1138,14 @@ top:
             }
         }
 #else
-        if (key == 0x1B && (key = _getch()) == '[') {
-            key = _getch();
+        if (key == 0x1B && (key = GETCH()) == '[') {
+            key = GETCH();
             switch(key) {
             case 'A': key = UP; sk = 1; break;
             case 'B': key = DOWN; sk = 1; break;
             case 'D': key = LEFT; sk = 1; break;
             case 'C': key = RIGHT; sk = 1; break;
-            case '3': if ((key = _getch()) == '~') key = DEL; sk = 1; break;
+            case '3': if ((key = GETCH()) == '~') key = DEL; sk = 1; break;
             case 'H': key = HOME; sk = 1; break;
             case 'F': key = ENDLINE; sk = 1; break;
             }
