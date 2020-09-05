@@ -202,16 +202,41 @@ void end_of_buffer(struct buffer *b)
 
 void start_of_line(struct buffer *b)
 {
+    /* Moves the cursor to the start of the line */
     while (b->g != b->a && *(b->g - 1) != '\n') LCH();
 }
 
 void end_of_line(struct buffer *b)
 {
+    /* Moves the cursor to the end of the line */
     while (*b->c != '\n' && b->c != b->e) RCH();
+}
+
+size_t col_index(struct buffer *b)
+{
+    /*
+     * Returns the column index of the cursor in the memory (not the screen),
+     * starting from zero.
+     */
+    char *q = b->g;
+    while (q != b->a && *(q - 1) != '\n') --q;
+    return b->g - q;
+}
+
+int down_line(struct buffer *b, size_t mult)
+{
+    size_t coli = col_index(b);
+    char *q = b->c;
+    while (mult && q != b->e) if (*q++ == '\n') --mult;
+    if (mult) return 1; /* Cannot move down far enough */
+    while (coli-- && q != b->e && *q != '\n') ++q;
+    move_right(b, q - b->c);
+    return 0;
 }
 
 int match_brace(struct buffer *b)
 {
+    /* Moves the cursor to the matching brace */
     size_t depth = 1; /* Depth inside nested braces */
     char orig = *b->c, target, *q;
     int right; /* Movement direction */
@@ -629,6 +654,7 @@ int paste(struct buffer *b, struct mem *p, size_t mult)
 
 int sys_cmd(char *cmd)
 {
+    /* Executes a system command */
     int r;
     if ((r = system(cmd)) == -1) return 1;
 #ifdef _WIN32
@@ -642,6 +668,7 @@ int sys_cmd(char *cmd)
 #ifdef _WIN32
 int setup_graphics(void)
 {
+    /* Turn on interpretation of VT100-like escape sequences */
     HANDLE out;
     DWORD mode;
     if ((out = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE) return 1;
@@ -674,6 +701,7 @@ int get_screen_size(size_t *height, size_t *width)
 
 void put_z(size_t a)
 {
+    /* Print a size_t value to stdout */
     size_t b = a, m = 1;
     while (b /= 10) m *= 10;
     do {putchar(a / m + '0'); a %= m;} while (m /= 10);
@@ -1163,6 +1191,7 @@ top:
             switch (key) {
             case LEFT: cr = move_left(cb, mult); goto top;
             case RIGHT: cr = move_right(cb, mult); goto top;
+            case DOWN: cr = down_line(cb, mult); goto top;
             case HOME: start_of_line(cb); goto top;
             case ENDLINE: end_of_line(cb); goto top;
             case DEL: cr = delete_char(cb, mult); goto top;
