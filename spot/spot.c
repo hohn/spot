@@ -85,12 +85,14 @@
 #define COPY 'W'
 #define CUT 'w'
 #define PASTE 'y'
+#define CUTTOEOL 'k'
+#define CUTTOSOL 'u'
 #define SEARCH 's'
 #define REPSEARCH '/'
 #define CENTRE 'l'
 #define REDRAW 'L'
 #define CLEXIT 'g'
-#define CLEXEC 'z'
+#define CLEXEC ';'
 #define STARTBUF '<'
 #define ENDBUF '>'
 #define TRIMWS 't'
@@ -98,7 +100,7 @@
 #define MATCHBRACE 'M'
 #define SAVE 'S'
 #define RENAME 'N'
-#define INSERTFILE 'i'
+#define INSERTFILE 'z'
 #define NEWBUF 'o'
 #define LEFTBUF '['
 #define RIGHTBUF ']'
@@ -1236,25 +1238,29 @@ top:
         /* Command mode only */
         if (cmd_mode) {
             switch (key) {
+            case CLOSE: running = 0; break;
             case STARTBUF: start_of_buffer(cb); break;
             case ENDBUF: end_of_buffer(cb); break;
             case REPSEARCH: cr = search(cb, se, bad); break;
             case TRIMWS: break;
             case MATCHBRACE: cr = match_brace(cb); break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
-            case RENAME: cla = 1; operation = 'R'; break;
-            case CLOSE: running = 0; break;
-            case CLEXIT: if (cla) {cla = 0; operation = '\0';} break;
             case SETMARK: set_mark(cb); break;
             case COPY: cr = copy_region(cb, p, 0); break;
             case CUT: cr = copy_region(cb, p, 1); break;
             case PASTE: cr = paste(cb, p, mult); break;
-            case SEARCH: cla = 1; operation = 'S'; break;
             case CENTRE: centre = 1; break;
             case INSERTMODE: cmd_mode = 0; break;
             case LEFTBUF: z->a ? --z->a : (cr = 1); break;
             /* z->u must be at least one here */
             case RIGHTBUF: z->a != z->u - 1 ? ++z->a : (cr = 1); break;
+
+            /* Command line related functions */
+            case RENAME: cla = 1; operation = 'R'; break;
+            case SEARCH: cla = 1; operation = 'S'; break;
+            case INSERTFILE: cla = 1; operation = 'I'; break;
+            case CLEXIT: cla = 0; operation = '\0'; break;
+
             case CLEXEC:
                 if (cla) {
                     cla = 0;
@@ -1267,6 +1273,9 @@ top:
                             set_bad(bad, se);
                         }
                         cr = search(*(z->z + z->a), se, bad);
+                    } else if (operation == 'I') {
+                        if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
+                        cr = insert_file(*(z->z + z->a), cl_str);
                     }
                     operation = '\0';
                 }
