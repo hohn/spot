@@ -1073,6 +1073,7 @@ int main(int argc, char **argv)
     int sk;                   /* Special key indicator */
     int cmd_mode = 1;         /* Command mode indicator */
     int digit;                /* Numerical digit */
+    unsigned char hex[2];     /* Hexadecimal array */
     int term_in = 0;          /* Terminal input */
     size_t mult;              /* Command multiplier (cannot be zero) */
     char *t;                  /* Temporary pointer */
@@ -1248,6 +1249,7 @@ top:
         if (cmd_mode) {
             switch (key) {
             case CLOSE: running = 0; break;
+            case INSERTMODE: cmd_mode = 0; break;
             case STARTBUF: start_of_buffer(cb); break;
             case ENDBUF: end_of_buffer(cb); break;
             case REPSEARCH: cr = search(cb, se, bad); break;
@@ -1259,7 +1261,17 @@ top:
             case CUT: cr = copy_region(cb, p, 1); break;
             case PASTE: cr = paste(cb, p, mult); break;
             case CENTRE: centre = 1; break;
-            case INSERTMODE: cmd_mode = 0; break;
+            case INSERTHEX:
+                for (i = 0; i < 2; ++i) {
+                    key = GETCH();
+                    if (ISASCII((unsigned int) key) && isxdigit((unsigned char) key)) {
+                        if (isdigit((unsigned char) key)) *(hex + i) = key - '0';
+                        else if (islower((unsigned char) key)) *(hex + i) = 10 + key - 'a';
+                        else if (isupper((unsigned char) key)) *(hex + i) = 10 + key - 'A';
+                    } else {cr = 1; goto top;}
+                }
+                cr = insert_char(cb, *hex * 16 + *(hex + 1), mult);
+                break;
             case LEFTBUF: z->a ? --z->a : (cr = 1); break;
             /* z->u must be at least one here */
             case RIGHTBUF: z->a != z->u - 1 ? ++z->a : (cr = 1); break;
