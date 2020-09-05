@@ -1259,6 +1259,7 @@ top:
             case RENAME: cla = 1; operation = 'R'; break;
             case SEARCH: cla = 1; operation = 'S'; break;
             case INSERTFILE: cla = 1; operation = 'I'; break;
+            case NEWBUF: cla = 1; operation = 'N'; break;
             case CLEXIT: cla = 0; operation = '\0'; break;
 
             case CLEXEC:
@@ -1276,6 +1277,9 @@ top:
                     } else if (operation == 'I') {
                         if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
                         cr = insert_file(*(z->z + z->a), cl_str);
+                    } else if (operation == 'N') {
+                        if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
+                        cr = new_buffer(z, cl_str);
                     }
                     operation = '\0';
                 }
