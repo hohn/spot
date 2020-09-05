@@ -223,13 +223,43 @@ size_t col_index(struct buffer *b)
     return b->g - q;
 }
 
+int up_line(struct buffer *b, size_t mult)
+{
+    /* Moves the cursor up mult lines */
+    size_t orig_coli, eol_coli;
+    char *q;
+    orig_coli = col_index(b); /* Get the original column index */
+    q = b->g - orig_coli; /* Jump to start of the line */
+    /*
+     * Move up mult lines, will stop at the end of the line.
+     * Please note that mult is not allowed to be zero.
+     */
+    while (mult && q != b->a) if (*--q == '\n') --mult;
+    if (mult) return 1; /* Cannot move up enough */
+    /*
+     * Physically move the cursor in the memory up mult lines,
+     * so that col_index can be called.
+     */
+    move_left(b, b->g - q);
+    /* Get the column index at the end of the new line */
+    eol_coli = col_index(b);
+    /* Move back along the line to same column index, if possible */
+    if (eol_coli > orig_coli) q -= eol_coli - orig_coli;
+    move_left(b, b->g - q);
+    return 0;
+}
+
 int down_line(struct buffer *b, size_t mult)
 {
-    size_t coli = col_index(b);
+    /* Moves the cursor down mult lines */
+    size_t coli = col_index(b); /* Get the existing column index */
     char *q = b->c;
+    /* Move down mult lines */
     while (mult && q != b->e) if (*q++ == '\n') --mult;
     if (mult) return 1; /* Cannot move down far enough */
+    /* Move forward along the to the original column index, if possible */
     while (coli-- && q != b->e && *q != '\n') ++q;
+    /* Physically move the cursor in the memory */
     move_right(b, q - b->c);
     return 0;
 }
@@ -1033,7 +1063,7 @@ int main(int argc, char **argv)
     int cmd_mode = 1;         /* Command mode indicator */
     int digit;                /* Numerical digit */
     int term_in = 0;          /* Terminal input */
-    size_t mult;              /* Command multiplier */
+    size_t mult;              /* Command multiplier (cannot be zero) */
     char *t;                  /* Temporary pointer */
     size_t i;                 /* Generic index */
 #ifndef _WIN32
@@ -1137,7 +1167,7 @@ top:
         mult = 1; /* Reset command multiplier */
         if (cmd_mode) {
             /* Read multiplier number */
-            mult = 0;
+            mult = 0; /* mult will not remain zero */
             while (isdigit(key)) {
                 if (MOF(mult, 10)) {cr = 1; goto top;}
                 mult *= 10;
@@ -1191,6 +1221,7 @@ top:
             switch (key) {
             case LEFT: cr = move_left(cb, mult); goto top;
             case RIGHT: cr = move_right(cb, mult); goto top;
+            case UP: cr = up_line(cb, mult); goto top;
             case DOWN: cr = down_line(cb, mult); goto top;
             case HOME: start_of_line(cb); goto top;
             case ENDLINE: end_of_line(cb); goto top;
