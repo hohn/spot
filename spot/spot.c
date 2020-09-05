@@ -308,6 +308,15 @@ int match_brace(struct buffer *b)
     return 1; /* Match not found */
 }
 
+void delete_buffer(struct buffer *b)
+{
+    /* Soft delete buffer */
+    b->g = b->a;
+    b->c = b->e;
+    b->m_set = 0;
+    b->m = 0;
+}
+
 void set_bad(size_t *bad, struct mem *se)
 {
     /* Sets the bad character table for the Quick Search algorithm */
@@ -1256,11 +1265,11 @@ top:
             case RIGHTBUF: z->a != z->u - 1 ? ++z->a : (cr = 1); break;
 
             /* Command line related functions */
-            case RENAME: cla = 1; operation = 'R'; break;
-            case SEARCH: cla = 1; operation = 'S'; break;
-            case INSERTFILE: cla = 1; operation = 'I'; break;
-            case NEWBUF: cla = 1; operation = 'N'; break;
-            case CLEXIT: cla = 0; operation = '\0'; break;
+            case RENAME: delete_buffer(cl); cla = 1; operation = 'R'; break;
+            case SEARCH: delete_buffer(cl); cla = 1; operation = 'S'; break;
+            case INSERTFILE: delete_buffer(cl); cla = 1; operation = 'I'; break;
+            case NEWBUF: delete_buffer(cl); cla = 1; operation = 'N'; break;
+            case CLEXIT: delete_buffer(cl); cla = 0; operation = '\0'; break;
 
             case CLEXEC:
                 if (cla) {
