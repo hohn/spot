@@ -1159,6 +1159,8 @@ top:
             ns = t;
         }
 
+        cr = 0; /* Reset command return value */
+
         /* Shortcut to the cursor's buffer */
         cb = cla ? cl : *(z->z + z->a);
 
@@ -1250,6 +1252,9 @@ top:
             case SEARCH: cla = 1; operation = 'S'; break;
             case CENTRE: centre = 1; break;
             case INSERTMODE: cmd_mode = 0; break;
+            case LEFTBUF: z->a ? --z->a : (cr = 1); break;
+            /* z->u must be at least one here */
+            case RIGHTBUF: z->a != z->u - 1 ? ++z->a : (cr = 1); break;
             case CLEXEC:
                 if (cla) {
                     cla = 0;
