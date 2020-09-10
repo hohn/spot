@@ -1048,7 +1048,8 @@ int main(int argc, char **argv)
 {
     int ret = 0;              /* Editor's return value */
     int running = 1;          /* Editor is running */
-    size_t h, w;              /* Screen height and width */
+    size_t h = 0, w = 0;      /* Screen height and width (real) */
+    size_t new_h, new_w;      /* New screen height and width (real) */
     size_t cy, cx;            /* Cursor's screen coordinates */
     struct tb *z;             /* The text buffers */
     struct buffer *cl = NULL; /* Command line buffer */
@@ -1062,12 +1063,12 @@ int main(int argc, char **argv)
     struct mem *p = NULL;     /* Paste memory */
     int cr = 0;               /* Command return value */
     int centre = 0;           /* Request to centre the cursor */
+    int redraw = 0;           /* Request to redraw the entire screen */
     struct buffer *cb;        /* Shortcut to the cursor's buffer */
     char *ns = NULL;          /* Next screen (virtual) */
     char *cs = NULL;          /* Current screen (virtual) */
     size_t ss = 0;            /* Screen size (virtual) */
     size_t sa = 0;            /* Terminal screen area (real) */
-    size_t c_sa;              /* Current terminal screen area (real) */
     /* Keyboard key (one physical key can send multiple) */
     int key;
     int sk;                   /* Special key indicator */
@@ -1132,15 +1133,16 @@ int main(int argc, char **argv)
 
 /* Top of the editor loop */
 top:
-        if (get_screen_size(&h, &w)) QUIT(1);
+        if (get_screen_size(&new_h, &new_w)) QUIT(1);
 
         /* Do graphics only if screen is big enough */
-        if (h >= 1 && w >= 1) {
-            if (h > INT_MAX / w) QUIT(1);
-            c_sa = h * w;
-            /* Change in screen size */
-            if (c_sa != sa) {
-                sa = c_sa;
+        if (new_h >= 1 && new_w >= 1) {
+            /* Requested redraw or change in screen dimensions */
+            if (redraw || new_h != h || new_w != w) {
+                h = new_h;
+                w = new_w;
+                if (h > INT_MAX / w) QUIT(1);
+                sa = h * w;
                 /* Bigger screen */
                 if (ss < sa) {
                     free(ns);
@@ -1261,6 +1263,7 @@ top:
             case CUT: cr = copy_region(cb, p, 1); break;
             case PASTE: cr = paste(cb, p, mult); break;
             case CENTRE: centre = 1; break;
+            case REDRAW: redraw = 1; break;
             case INSERTHEX:
                 for (i = 0; i < 2; ++i) {
                     key = GETCH();
