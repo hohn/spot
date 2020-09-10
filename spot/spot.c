@@ -82,33 +82,34 @@
 #define BKSPACE 'h'
 #define SETMARK 'm'
 #define NEWLINE 'j'
-#define COPY 'W'
+#define COPY 'c'
 #define CUT 'w'
 #define PASTE 'y'
 #define CUTTOEOL 'k'
 #define CUTTOSOL 'u'
-#define SEARCH 's'
-#define REPSEARCH '/'
+#define SEARCH '/'
+#define REPSEARCH '\\'
 #define CENTRE 'l'
 #define REDRAW 'L'
 #define CLEXIT 'g'
 #define CLEXEC ';'
-#define STARTBUF '<'
-#define ENDBUF '>'
-#define TRIMWS 't'
-#define CLEAN 'T'
-#define MATCHBRACE 'M'
-#define SAVE 'S'
-#define RENAME 'N'
+#define STARTBUF ','
+#define ENDBUF '.'
+#define TRIMCLEAN 't'
+#define MATCHBRACE '='
+#define SAVE 's'
+#define RENAME 'r'
 #define INSERTFILE 'z'
 #define NEWBUF 'o'
 #define LEFTBUF '['
 #define RIGHTBUF ']'
-#define CLOSE 'C'
-#define REGEXREG 'r'
-#define REGEXALL 'R'
-#define SHELLCMD 'x'
+#define REGEXREG 'x'
 #define INSERTHEX 'q'
+/*
+ * Close without prompting to save.
+ * The only command that requires pressing shift.
+ */
+#define CLOSE '!'
 
 /* size_t integer overflow tests */
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -315,6 +316,18 @@ void delete_buffer(struct buffer *b)
     b->c = b->e;
     b->m_set = 0;
     b->m = 0;
+}
+
+int delete_region(struct buffer *b)
+{
+    /* Soft delete region */
+    size_t ci = b->g - b->a; /* Cursor index */
+    if (!b->m_set) return 1; /* No region */
+    if (b->m < ci) b->g = b->a + b->m;
+    else b->c = b->a + b->m;
+    b->m_set = 0;
+    b->m = 0;
+    return 0;
 }
 
 void set_bad(size_t *bad, struct mem *se)
@@ -646,6 +659,33 @@ void set_mark(struct buffer *b)
 {
     b->m = b->g - b->a;
     b->m_set = 1;
+}
+
+int write_region(struct buffer *b, char *fn)
+{
+    /* Writes the region to file */
+    FILE *fp;
+    size_t num;
+    size_t ci = b->g - b->a; /* Cursor index */
+    if (!b->m_set) return 1; /* No region */
+    if (b->m == ci) return 0; /* Empty region, nothing to do */
+    if ((fp = fopen(fn, "wb")) == NULL) return 1;
+    /* Mark before cursor */
+    if (b->m < ci) {
+        num = (size_t) (b->g - b->a) - b->m;
+        if (fwrite(b->a, 1, num, fp) != num) {
+            fclose(fp);
+            return 1;
+        }
+    } else {
+        num = b->m - (size_t) (b->c - b->a);
+        if (fwrite(b->c, 1, num, fp) != num) {
+            fclose(fp);
+            return 1;
+        }
+    }
+    if (fclose(fp)) return 1;
+    return 0;
 }
 
 int copy_region(struct buffer *b, struct mem *p, int del)
@@ -1255,7 +1295,7 @@ top:
             case STARTBUF: start_of_buffer(cb); break;
             case ENDBUF: end_of_buffer(cb); break;
             case REPSEARCH: cr = search(cb, se, bad); break;
-            case TRIMWS: break;
+            case TRIMCLEAN: break;
             case MATCHBRACE: cr = match_brace(cb); break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case SETMARK: set_mark(cb); break;
@@ -1284,6 +1324,7 @@ top:
             case SEARCH: delete_buffer(cl); cla = 1; operation = 'S'; break;
             case INSERTFILE: delete_buffer(cl); cla = 1; operation = 'I'; break;
             case NEWBUF: delete_buffer(cl); cla = 1; operation = 'N'; break;
+            case REGEXREG: delete_buffer(cl); cla = 1; operation = 'X'; break;
             case CLEXIT: delete_buffer(cl); cla = 0; operation = '\0'; break;
 
             case CLEXEC:
@@ -1304,6 +1345,12 @@ top:
                     } else if (operation == 'N') {
                         if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
                         cr = new_buffer(z, cl_str);
+                    } else if (operation == 'X') {
+                        if (write_buffer(cl, ".c")) {cr = 1; break;}
+                        if (write_region(*(z->z + z->a), ".i")) {cr = 1; break;}
+                        if (sys_cmd("sed -r -f .c .i > .o")) {cr = 1; break;}
+                        if (delete_region(*(z->z + z->a))) {cr = 1; break;}
+                        cr = insert_file(*(z->z + z->a), ".o");
                     }
                     operation = '\0';
                 }
