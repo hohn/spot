@@ -45,6 +45,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Get a character from the input, which is either the terminal (keyboard)
+ * or stdin. Only use in main because of the dependency on term_in.
+ */
 #ifdef _WIN32
 #define GETCH() (term_in ? _getch() : getchar())
 #else
@@ -72,10 +76,15 @@
 #define INSERTMODE 'i'
 
 /* Command keys */
+/* Previous */
 #define UP 'p'
+/* Next */
 #define DOWN 'n'
+/* Backwards */
 #define LEFT 'b'
+/* Forwards */
 #define RIGHT 'f'
+/* Antes */
 #define HOME 'a'
 #define ENDLINE 'e'
 #define DEL 'd'
@@ -83,14 +92,19 @@
 #define SETMARK 'm'
 #define NEWLINE 'j'
 #define COPY 'c'
+/* Wipe */
 #define CUT 'w'
+/* Yank */
 #define PASTE 'y'
+/* Kill */
 #define CUTTOEOL 'k'
+/* Uproot */
 #define CUTTOSOL 'u'
 #define SEARCH '/'
 #define REPSEARCH '\\'
+/* Level cursor on screen */
 #define CENTRE 'l'
-#define REDRAW 'L'
+#define REDRAW '-'
 #define CLEXIT 'g'
 #define CLEXEC ';'
 #define STARTBUF ','
@@ -100,10 +114,12 @@
 #define SAVE 's'
 #define RENAME 'r'
 #define INSERTFILE 'z'
+/* Open file */
 #define NEWBUF 'o'
 #define LEFTBUF '['
 #define RIGHTBUF ']'
 #define REGEXREG 'x'
+/* Quote hex */
 #define INSERTHEX 'q'
 /*
  * Close without prompting to save.
@@ -122,11 +138,13 @@
 #define CLEAR_SCREEN() printf("\033[2J")
 #define CLEAR_LINE() printf("\033[2K")
 
-/* One character movements with no out of bounds checking */
-/* Left */
+/* One character operations with no out of bounds checking */
+/* Move left */
 #define LCH() (*--b->c = *--b->g)
-/* Right */
+/* Move right */
 #define RCH() (*b->g++ = *b->c++)
+/* Delete */
+#define DCH() (b->c++)
 
 /*
  * Sets the return value for the text editor and jumps to the clean up.
@@ -328,6 +346,44 @@ int delete_region(struct buffer *b)
     b->m_set = 0;
     b->m = 0;
     return 0;
+}
+
+void trim_clean(struct buffer *b)
+{
+    /*
+     * Trims (deletes) trailing whitespace and cleans (deletes all characters
+     * that are not ASCII graph, space, tab, or newline.
+     */
+    char *q;
+    int nl_enc = 0; /* Trailing newline character has been encountered */
+    int at_eol = 0; /* At end of line */
+    end_of_buffer(b);
+    if (b->g == b->a) return; /* Empty buffer */
+    LCH(); /* Move to the left of the EOBCH, as this cannot be deleted */
+    /*
+     * Process the end of the file up until the first graph character, that is
+     * the trailing characters at the end of the file. This is done backwards
+     * starting from the end of the buffer. The first newline character
+     * encountered will be preserved.
+     */
+    while (!isgraph((unsigned char) *b->c)) {
+        if (!nl_enc && *b->c == '\n') nl_enc = 1;
+        else DCH();
+        if (b->g == b->a) break; /* Start of buffer */
+        else LCH(); /* Move left */
+    }
+    /*
+     * Process the rest of the file, keeping track if the cursor is at the end
+     * of the line (in which case whitespace is trimmed too).
+     */
+    while (1) {
+        if (*b->c == '\n') at_eol = 1;
+        else if (isgraph((unsigned char) *b->c)) at_eol = 0;
+        else if (at_eol) DCH();
+        else if (*b->c != ' ' && *b->c != '\t') DCH();
+        if (b->g == b->a) break; /* Start of buffer */
+        else LCH(); /* Move left */
+    }
 }
 
 void set_bad(size_t *bad, struct mem *se)
@@ -1295,7 +1351,7 @@ top:
             case STARTBUF: start_of_buffer(cb); break;
             case ENDBUF: end_of_buffer(cb); break;
             case REPSEARCH: cr = search(cb, se, bad); break;
-            case TRIMCLEAN: break;
+            case TRIMCLEAN: trim_clean(cb); break;
             case MATCHBRACE: cr = match_brace(cb); break;
             case SAVE: cr = write_buffer(cb, cb->fn); break;
             case SETMARK: set_mark(cb); break;
