@@ -55,6 +55,20 @@
 #define GETCH() getchar()
 #endif
 
+/* Files used by sed */
+#define CLFILE ".c"
+#define INFILE ".i"
+#define OUTFILE ".o"
+#define ERRFILE ".e"
+
+#ifdef _WIN32
+#define SEDSTR "sed -C -b -r -f"
+#else
+#define SEDSTR "LC_ALL=C sed -r -f"
+#endif
+
+#define SEDCMD SEDSTR " " CLFILE " " INFILE " 1> " OUTFILE " 2> " ERRFILE
+
 /*
  * Default gap size. Must be at least 1.
  * It is good to set small while testing, but BUFSIZ is a sensible choice for
@@ -119,12 +133,10 @@
 #define LEFTBUF '['
 #define RIGHTBUF ']'
 #define REGEXREG 'x'
+#define UNDOREGEX 'X'
 /* Quote hex */
 #define INSERTHEX 'q'
-/*
- * Close without prompting to save.
- * The only command that requires pressing shift.
- */
+/* Close without prompting to save */
 #define CLOSE '!'
 
 /* size_t integer overflow tests */
@@ -336,18 +348,6 @@ void delete_buffer(struct buffer *b)
     b->m = 0;
 }
 
-int delete_region(struct buffer *b)
-{
-    /* Soft delete region */
-    size_t ci = b->g - b->a; /* Cursor index */
-    if (!b->m_set) return 1; /* No region */
-    if (b->m < ci) b->g = b->a + b->m;
-    else b->c = b->a + b->m;
-    b->m_set = 0;
-    b->m = 0;
-    return 0;
-}
-
 void trim_clean(struct buffer *b)
 {
     /*
@@ -384,6 +384,7 @@ void trim_clean(struct buffer *b)
         if (b->g == b->a) break; /* Start of buffer */
         else LCH(); /* Move left */
     }
+    b->m_set = 0;
 }
 
 void set_bad(size_t *bad, struct mem *se)
@@ -443,6 +444,7 @@ int grow_gap(struct buffer *b, size_t req)
      * can fit the planned insert plus the default GAP (to avoid having to
      * grow the gap again soon afterwards), or so that the whole buffer is
      * doubled (to protect against repeated inserts), whichever is larger.
+     * grow_gap does not change the mark.
      */
     size_t req_increase, current_size, target_size, increase;
     char *t, *tc;
@@ -580,8 +582,9 @@ void free_mem(struct mem *p)
 int insert_file(struct buffer *b, char *fn)
 {
     /*
-     * Inserts a file into the right-hand side of the old gap, so that the
-     * inserted text will appear after the new cursor position.
+     * Inserts a file.
+     * The file will be inserted into the right-hand side of the old gap,
+     * so that the inserted text will commence from the new cursor.
      */
     struct stat st;
     size_t fs;
@@ -599,6 +602,62 @@ int insert_file(struct buffer *b, char *fn)
     if (fclose(fp)) return 1;
     b->c -= fs;
     b->m_set = 0;
+    return 0;
+}
+
+int replace_region(struct buffer *b, char *fn)
+{
+    /*
+     * Replaces the region with a file. The file is read into memory before
+     * the old region is deleted, so that the operation is transactional.
+     * The inserted text will be marked as the new region.
+     * grow_gap does not change the mark.
+     */
+    size_t ci = b->g - b->a; /* Cursor index */
+    size_t reg_s = b->m < ci ? ci - b->m : b->m - ci; /* Region size */
+    struct stat st;
+    size_t fs;
+    char *t;
+    FILE *fp;
+    if (!b->m_set) return 1; /* No region */
+    if (stat(fn, &st)) return 1;
+    if (!((st.st_mode & S_IFMT) == S_IFREG) || st.st_size < 0) return 1;
+    if (!st.st_size) return 0;
+    fs = (size_t) st.st_size;
+    /* Get temporary memory */
+    if ((t = malloc(fs)) == NULL) return 1;
+    if ((fp = fopen(fn, "rb")) == NULL) {
+        free(t);
+        return 1;
+    }
+    if (fread(t, 1, fs, fp) != fs) {
+        free(t);
+        fclose(fp);
+        return 1;
+    }
+    if (fclose(fp)) {
+        free(t);
+        return 1;
+    }
+    /* The current region will be recycled */
+    if (fs > reg_s && fs - reg_s > (size_t) (b->c - b->g)
+        && grow_gap(b, fs - reg_s)) {
+        free(t);
+        return 1;
+    }
+    /* Cursor at end of the region */
+    if (b->m < ci) {
+        backspace_char(b, ci - b->m); /* Will not be out of bounds */
+        memcpy(b->g, t, fs); /* Copy memory to left-hand side of gap */
+        b->g += fs;
+    } else {
+        delete_char(b, b->m - ci); /* Will not be out of bounds */
+        memcpy(b->c - fs, t, fs); /* Copy memory to right-hand side of gap */
+        b->c -= fs;
+    }
+    /* backspace_char and delete_char unset the mark, so set it again */
+    b->m_set = 1;
+    free(t);
     return 0;
 }
 
@@ -787,6 +846,20 @@ int paste(struct buffer *b, struct mem *p, size_t mult)
     while (mult--) {memcpy(b->g, p->p, p->u); b->g += p->u;}
     b->m_set = 0;
     return 0;
+}
+
+int cut_to_eol(struct buffer *b, struct mem *p)
+{
+    set_mark(b);
+    end_of_line(b);
+    return copy_region(b, p, 1);
+}
+
+int cut_to_sol(struct buffer *b, struct mem *p)
+{
+    set_mark(b);
+    start_of_line(b);
+    return copy_region(b, p, 1);
 }
 
 int sys_cmd(char *cmd)
@@ -1358,6 +1431,9 @@ top:
             case COPY: cr = copy_region(cb, p, 0); break;
             case CUT: cr = copy_region(cb, p, 1); break;
             case PASTE: cr = paste(cb, p, mult); break;
+            case CUTTOEOL: cr = cut_to_eol(cb, p); break;
+            case CUTTOSOL: cr = cut_to_sol(cb, p); break;
+            case UNDOREGEX: cr = replace_region(cb, INFILE); break;
             case CENTRE: centre = 1; break;
             case REDRAW: redraw = 1; break;
             case INSERTHEX:
@@ -1402,11 +1478,10 @@ top:
                         if (buffer_to_str(cl, &cl_str)) {cr = 1; break;}
                         cr = new_buffer(z, cl_str);
                     } else if (operation == 'X') {
-                        if (write_buffer(cl, ".c")) {cr = 1; break;}
-                        if (write_region(*(z->z + z->a), ".i")) {cr = 1; break;}
-                        if (sys_cmd("sed -r -f .c .i > .o")) {cr = 1; break;}
-                        if (delete_region(*(z->z + z->a))) {cr = 1; break;}
-                        cr = insert_file(*(z->z + z->a), ".o");
+                        if (write_buffer(cl, CLFILE)) {cr = 1; break;}
+                        if (write_region(*(z->z + z->a), INFILE)) {cr = 1; break;}
+                        if (sys_cmd(SEDCMD)) {cr = 1; break;}
+                        cr = replace_region(*(z->z + z->a), ".o");
                     }
                     operation = '\0';
                 }
