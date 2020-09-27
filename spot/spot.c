@@ -55,11 +55,20 @@
 #define GETCH() getchar()
 #endif
 
-/* Files used by sed */
-#define CLFILE ".c"
-#define INFILE ".i"
-#define OUTFILE ".o"
-#define ERRFILE ".e"
+/*
+ * Max filename size for the log file and the sed related files, including
+ * the trailing \0 character.
+ */
+#define MAXFN 40
+
+/* Log file suffix */
+#define LOGSUFF "_spot_log"
+
+/* File suffixes used by sed */
+#define CLSUFF "_c"
+#define INSUFF "_i"
+#define OUTSUFF "_o"
+#define ERRSUFF "_e"
 
 #ifdef _WIN32
 #define SEDSTR "sed -C -b -r -f"
@@ -67,7 +76,8 @@
 #define SEDSTR "LC_ALL=C sed -r -f"
 #endif
 
-#define SEDCMD SEDSTR " " CLFILE " " INFILE " 1> " OUTFILE " 2> " ERRFILE
+/* Max sed command size including trailing \0 character */
+#define MAXCMD 200
 
 /*
  * Default gap size. Must be at least 1.
@@ -1618,15 +1628,37 @@ int main(int argc, char **argv)
     unsigned char hex[2];     /* Hexadecimal array */
     int term_in = 0;          /* Terminal input */
     size_t mult;              /* Command multiplier (cannot be zero) */
+    long pid;                 /* Process ID */
+    char logfn[MAXFN];        /* Log filename */
+    char clfn[MAXFN];         /* Command line filename used as sed script */
+    char infn[MAXFN];         /* Sed input filename */
+    char outfn[MAXFN];        /* Sed output filename */
+    char errfn[MAXFN];        /* Sed error filename */
+    char sedcmd[MAXCMD];      /* Sed command */
+    int regex_ok = 0;         /* Last regex completed successfully */
     char *t;                  /* Temporary pointer */
     size_t i;                 /* Generic index */
 #ifndef _WIN32
     struct termios term_orig, term_new;
 #endif
 
-    /* Open the log file */
+    /* Get process ID */
+    pid = (long) getpid();
+
+    /* Create filenames */
+    snprintf(logfn, MAXFN, ".%ld%s", pid, LOGSUFF);
+    snprintf(clfn, MAXFN, ".%ld%s", pid, CLSUFF);
+    snprintf(infn, MAXFN, ".%ld%s", pid, INSUFF);
+    snprintf(outfn, MAXFN, ".%ld%s", pid, OUTSUFF);
+    snprintf(errfn, MAXFN, ".%ld%s", pid, ERRSUFF);
+
+    /* Create sed command */
+    snprintf(sedcmd, MAXCMD, "%s %s %s 1> %s 2> %s",
+        SEDSTR, clfn, infn, outfn, errfn);
+
+    /* Open the log file for appending */
     errno = 0;
-    if ((logfp = fopen(LOGFILE, "wb")) == NULL) {
+    if ((logfp = fopen(logfn, "ab")) == NULL) {
         fprintf(stderr, "%s: %s: %d: %s\n", __FILE__, func, __LINE__,
             "cannot open log file");
         return 1;
@@ -1837,16 +1869,20 @@ top:
             case PASTE: cr = paste(cb, p, mult); break;
             case CUTTOEOL: cr = cut_to_eol(cb, p); break;
             case CUTTOSOL: cr = cut_to_sol(cb, p); break;
-            case UNDOREGEX: cr = replace_region(cb, INFILE); break;
+            case UNDOREGEX: if (regex_ok) cr = replace_region(cb, infn); break;
             case CENTRE: centre = 1; break;
             case REDRAW: redraw = 1; break;
             case INSERTHEX:
                 for (i = 0; i < 2; ++i) {
                     key = GETCH();
-                    if (ISASCII((unsigned int) key) && isxdigit((unsigned char) key)) {
-                        if (isdigit((unsigned char) key)) *(hex + i) = key - '0';
-                        else if (islower((unsigned char) key)) *(hex + i) = 10 + key - 'a';
-                        else if (isupper((unsigned char) key)) *(hex + i) = 10 + key - 'A';
+                    if (ISASCII((unsigned int) key)
+                        && isxdigit((unsigned char) key)) {
+                        if (isdigit((unsigned char) key))
+                            *(hex + i) = key - '0';
+                        else if (islower((unsigned char) key))
+                            *(hex + i) = 10 + key - 'a';
+                        else if (isupper((unsigned char) key))
+                            *(hex + i) = 10 + key - 'A';
                     } else {
                         LOG("insert hex: invalid digit");
                         cr = 1;
@@ -1906,19 +1942,21 @@ top:
                         }
                         cr = new_buffer(z, cl_str);
                     } else if (operation == 'X') {
-                        if (write_buffer(cl, CLFILE)) {
+                        regex_ok = 0; /* Clear as may fail */
+                        if (write_buffer(cl, clfn)) {
                             cr = 1;
                             break;
                         }
-                        if (write_region(*(z->z + z->a), INFILE)) {
+                        if (write_region(*(z->z + z->a), infn)) {
                             cr = 1;
                             break;
                         }
-                        if (sys_cmd(SEDCMD)) {
+                        if (sys_cmd(sedcmd)) {
                             cr = 1;
                             break;
                         }
-                        cr = replace_region(*(z->z + z->a), ".o");
+                        if (!(cr = replace_region(*(z->z + z->a), outfn)))
+                            regex_ok = 1;
                     }
                     operation = '\0';
                 }
@@ -1945,6 +1983,32 @@ clean_up:
         ret = 1;
     }
 #endif
+    /*
+     * Remove sed files. Will not cleanup files that exist from a failed regex
+     * attempt.
+     */
+    if (regex_ok) {
+        errno = 0;
+        if (remove(clfn)) {
+            LOGE("remove failed");
+            ret = 1;
+        }
+        errno = 0;
+        if (remove(infn)) {
+            LOGE("remove failed");
+            ret = 1;
+        }
+        errno = 0;
+        if (remove(outfn)) {
+            LOGE("remove failed");
+            ret = 1;
+        }
+        errno = 0;
+        if (remove(errfn)) {
+            LOGE("remove failed");
+            ret = 1;
+        }
+    }
     free_buffer(cl);
     free_tb(z);
     free_mem(se);
@@ -1959,5 +2023,6 @@ clean_up:
             "failed to close log file");
         ret = 1;
     }
+
     return ret;
 }
