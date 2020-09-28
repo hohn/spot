@@ -55,20 +55,14 @@
 #define GETCH() getchar()
 #endif
 
-/*
- * Max filename size for the log file and the sed related files, including
- * the trailing \0 character.
- */
-#define MAXFN 40
+/* Log file template */
+#define LOGTEMPLATE ".spot_log_XXXXXXXXXX"
 
-/* Log file suffix */
-#define LOGSUFF "_spot_log"
-
-/* File suffixes used by sed */
-#define CLSUFF "_c"
-#define INSUFF "_i"
-#define OUTSUFF "_o"
-#define ERRSUFF "_e"
+/* Templates for files used by sed */
+#define CLTEMPLATE ".c_XXXXXXXXXX"
+#define INTEMPLATE ".i_XXXXXXXXXX"
+#define OUTTEMPLATE ".o_XXXXXXXXXX"
+#define ERRTEMPLATE ".e_XXXXXXXXXX"
 
 #ifdef _WIN32
 #define SEDSTR "sed -C -b -r -f"
@@ -169,9 +163,6 @@
 /* Delete */
 #define DCH() (b->c++)
 
-/* Log file */
-#define LOGFILE ".spot_log"
-
 /* Global log file pointer */
 FILE *logfp = NULL;
 
@@ -189,7 +180,7 @@ FILE *logfp = NULL;
 } while (0)
 
 /*
- * Sets the return value for the text editor to 1, indicating failure.
+ * Sets the return value for the text editor (ret) to 1, indicating failure.
  * Logs an error message (without errno) and jumps to the clean up.
  * Only use in main.
  */
@@ -204,6 +195,14 @@ FILE *logfp = NULL;
     LOGE(m);          \
     ret = 1;          \
     goto clean_up;    \
+} while (0)
+
+/* Deletes a file with error logging. Does not set ret to failure */
+#define RM(fn) do {            \
+    errno = 0;                 \
+    if (remove(fn)) {          \
+        LOGE("remove failed"); \
+    }                          \
 } while (0)
 
 /*
@@ -864,7 +863,7 @@ int replace_region(struct buffer *b, char *fn)
     return 0;
 }
 
-int write_buffer(struct buffer *b, char *fn)
+int write_buffer(struct buffer *b, char *fn, int backup_req)
 {
     /*
      * Writes a buffer to file. If the file already exists, then it will be
@@ -878,7 +877,7 @@ int write_buffer(struct buffer *b, char *fn)
     FILE *fp;
     if (fn == NULL) return 1;
     /* Create backup of the regular file */
-    if (!stat(fn, &st) && st.st_mode & S_IFREG) {
+    if (backup_req && !stat(fn, &st) && st.st_mode & S_IFREG) {
         len = strlen(fn);
         if (AOF(len, 2)) {
             LOG("size_t addition overflow");
@@ -1594,6 +1593,49 @@ int new_buffer(struct tb *z, char *fn)
     return 0;
 }
 
+char *make_temp_file(char *template)
+{
+    char *func = "make_temp_file";
+    char *t;
+    size_t len = strlen(template);
+#ifdef _WIN32
+    HANDLE fh;
+#else
+    int fd;
+#endif
+    errno = 0;
+    if ((t = malloc(len + 1)) == NULL) {
+        LOGE("malloc failed");
+        return NULL;
+    }
+    memcpy(t, template, len);
+    *(t + len) = '\0';
+
+#ifdef _WIN32
+    errno = 0;
+    if (_mktemp_s(t, len + 1)) {
+        LOGE("_mktemp_s failed");
+        return NULL;
+    }
+    if ((fh = CreateFile(t, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+        FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE) return NULL;
+    if (!CloseHandle(fh)) return NULL;
+#else
+    errno = 0;
+    if ((fd = mkstemp(t)) == -1) {
+        LOGE("mkstemp failed");
+        return NULL;
+    }
+    errno = 0;
+    if (close(fd)) {
+        LOGE("close failed");
+        return NULL;
+    }
+#endif
+
+    return t;
+}
+
 int main(int argc, char **argv)
 {
     char *func = "main";      /* Function name */
@@ -1628,12 +1670,11 @@ int main(int argc, char **argv)
     unsigned char hex[2];     /* Hexadecimal array */
     int term_in = 0;          /* Terminal input */
     size_t mult;              /* Command multiplier (cannot be zero) */
-    long pid;                 /* Process ID */
-    char logfn[MAXFN];        /* Log filename */
-    char clfn[MAXFN];         /* Command line filename used as sed script */
-    char infn[MAXFN];         /* Sed input filename */
-    char outfn[MAXFN];        /* Sed output filename */
-    char errfn[MAXFN];        /* Sed error filename */
+    char *logfn = NULL;       /* Log filename */
+    char *clfn = NULL;        /* Command line filename used as sed script */
+    char *infn = NULL;        /* Sed input filename */
+    char *outfn = NULL;       /* Sed output filename */
+    char *errfn = NULL;       /* Sed error filename */
     char sedcmd[MAXCMD];      /* Sed command */
     int regex_ok = 0;         /* Last regex completed successfully */
     char *t;                  /* Temporary pointer */
@@ -1642,27 +1683,35 @@ int main(int argc, char **argv)
     struct termios term_orig, term_new;
 #endif
 
-    /* Get process ID */
-    pid = (long) getpid();
+    /* Create log file */
+    if ((logfn = make_temp_file(LOGTEMPLATE)) == NULL) {
+        fprintf(stderr, "%s: %s: %d: %s\n", __FILE__, func, __LINE__,
+            "cannot create log file");
+        return 1;
+    }
+    /* Open the log file */
+    errno = 0;
+    if ((logfp = fopen(logfn, "wb")) == NULL) {
+        fprintf(stderr, "%s: %s: %d: %s\n", __FILE__, func, __LINE__,
+            "cannot open log file");
+        free(logfn);
+        return 1;
+    }
 
-    /* Create filenames */
-    snprintf(logfn, MAXFN, ".%ld%s", pid, LOGSUFF);
-    snprintf(clfn, MAXFN, ".%ld%s", pid, CLSUFF);
-    snprintf(infn, MAXFN, ".%ld%s", pid, INSUFF);
-    snprintf(outfn, MAXFN, ".%ld%s", pid, OUTSUFF);
-    snprintf(errfn, MAXFN, ".%ld%s", pid, ERRSUFF);
+    /* Create files for sed */
+    if ((clfn = make_temp_file(CLTEMPLATE)) == NULL)
+        QUIT("failed to make command line file for sed script");
+    if ((infn = make_temp_file(INTEMPLATE)) == NULL)
+        QUIT("failed to make sed input file");
+    if ((outfn = make_temp_file(OUTTEMPLATE)) == NULL)
+        QUIT("failed to make sed output file");
+    if ((errfn = make_temp_file(ERRTEMPLATE)) == NULL)
+        QUIT("failed to make sed error file");
 
     /* Create sed command */
     snprintf(sedcmd, MAXCMD, "%s %s %s 1> %s 2> %s",
         SEDSTR, clfn, infn, outfn, errfn);
 
-    /* Open the log file for appending */
-    errno = 0;
-    if ((logfp = fopen(logfn, "ab")) == NULL) {
-        fprintf(stderr, "%s: %s: %d: %s\n", __FILE__, func, __LINE__,
-            "cannot open log file");
-        return 1;
-    }
 
     /* Ignore interrupt, sent by ^C */
     errno = 0;
@@ -1862,7 +1911,7 @@ top:
             case REPSEARCH: cr = search(cb, se, bad); break;
             case TRIMCLEAN: trim_clean(cb); break;
             case MATCHBRACE: cr = match_brace(cb); break;
-            case SAVE: cr = write_buffer(cb, cb->fn); break;
+            case SAVE: cr = write_buffer(cb, cb->fn, 1); break;
             case SETMARK: set_mark(cb); break;
             case COPY: cr = copy_region(cb, p, 0); break;
             case CUT: cr = copy_region(cb, p, 1); break;
@@ -1943,7 +1992,7 @@ top:
                         cr = new_buffer(z, cl_str);
                     } else if (operation == 'X') {
                         regex_ok = 0; /* Clear as may fail */
-                        if (write_buffer(cl, clfn)) {
+                        if (write_buffer(cl, clfn, 0)) {
                             cr = 1;
                             break;
                         }
@@ -1983,32 +2032,12 @@ clean_up:
         ret = 1;
     }
 #endif
-    /*
-     * Remove sed files. Will not cleanup files that exist from a failed regex
-     * attempt.
-     */
-    if (regex_ok) {
-        errno = 0;
-        if (remove(clfn)) {
-            LOGE("remove failed");
-            ret = 1;
-        }
-        errno = 0;
-        if (remove(infn)) {
-            LOGE("remove failed");
-            ret = 1;
-        }
-        errno = 0;
-        if (remove(outfn)) {
-            LOGE("remove failed");
-            ret = 1;
-        }
-        errno = 0;
-        if (remove(errfn)) {
-            LOGE("remove failed");
-            ret = 1;
-        }
-    }
+    /* Remove files for sed, without setting ret on failure */
+    RM(clfn);
+    RM(infn);
+    RM(outfn);
+    RM(errfn);
+    /* Free memory */
     free_buffer(cl);
     free_tb(z);
     free_mem(se);
@@ -2016,6 +2045,11 @@ clean_up:
     free(cl_str);
     free(ns);
     free(cs);
+    free(logfn);
+    free(clfn);
+    free(infn);
+    free(outfn);
+    free(errfn);
     /* Close log file */
     errno = 0;
     if (fclose(logfp)) {
@@ -2023,6 +2057,5 @@ clean_up:
             "failed to close log file");
         ret = 1;
     }
-
     return ret;
 }
