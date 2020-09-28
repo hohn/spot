@@ -38,6 +38,7 @@
 #endif
 
 #include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdint.h>
@@ -425,7 +426,6 @@ void trim_clean(struct buffer *b)
      * Trims (deletes) trailing whitespace and cleans (deletes all characters
      * that are not ASCII graph, space, tab, or newline.
      */
-    char *q;
     int nl_enc = 0; /* Trailing newline character has been encountered */
     int at_eol = 0; /* At end of line */
     end_of_buffer(b);
@@ -800,7 +800,6 @@ int replace_region(struct buffer *b, char *fn)
     char *func = "replace_region";
     size_t ci = b->g - b->a; /* Cursor index */
     size_t reg_s = b->m < ci ? ci - b->m : b->m - ci; /* Region size */
-    struct stat st;
     size_t fs;
     char *t;
     FILE *fp;
