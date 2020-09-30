@@ -19,6 +19,25 @@
  * Dedicated to my son who was only a 4mm `spot' in his first ultrasound.
  */
 
+/*
+ * README:
+ * Depending on your system:
+ * > cl spot.c
+ * or
+ * $ cc spot.c && mv a.out spot
+ * and place spot.exe or spot somewhere in your PATH.
+ *
+ * spot:
+ * - Is cross-platform.
+ * - Does not use any curses library.
+ * - Uses a double buffering method for graphics which has no flickering.
+ * - Uses the gap buffer method for text with transactional operations.
+ * - Uses the Quick Search algorithm with a reusable bad character table on
+     repeated searches.
+ * - Is a comfortable modal editor (the key bindings are below).
+ * - Can receive keys from a pipe.
+ */
+
 #ifdef __linux__
 #define _DEFAULT_SOURCE
 #endif
@@ -47,48 +66,8 @@
 #include <string.h>
 
 /*
- * Get a character from the input, which is either the terminal (keyboard)
- * or stdin. Only use in main because of the dependency on term_in.
+ * KEY BINDINGS
  */
-#ifdef _WIN32
-#define GETCH() (term_in ? _getch() : getchar())
-#else
-#define GETCH() getchar()
-#endif
-
-/* Log file template */
-#define LOGTEMPLATE ".spot_log_XXXXXXXXXX"
-
-/* Templates for files used by sed */
-#define CLTEMPLATE ".c_XXXXXXXXXX"
-#define INTEMPLATE ".i_XXXXXXXXXX"
-#define OUTTEMPLATE ".o_XXXXXXXXXX"
-#define ERRTEMPLATE ".e_XXXXXXXXXX"
-
-#ifdef _WIN32
-#define SEDSTR "sed -C -b -r -f"
-#else
-#define SEDSTR "LC_ALL=C sed -r -f"
-#endif
-
-/* Max sed command size including trailing \0 character */
-#define MAXCMD 200
-
-/*
- * Default gap size. Must be at least 1.
- * It is good to set small while testing, but BUFSIZ is a sensible choice for
- * real use (to limit the expense of growing the gap).
- */
-#define GAP 2
-
-/* Default number of spare text buffer pointers. Must be at least 1 */
-#define SPARETB 10
-
-/*
- * End Of Buffer CHaracter. This cannot be deleted, but will not be written to
- * file.
- */
-#define EOBCH '~'
 
 /* Changing modes */
 #define CMDMODE '\t'
@@ -144,6 +123,50 @@
 #define INSERTHEX 'q'
 /* Close without prompting to save */
 #define CLOSE '!'
+
+/*
+ * Get a character from the input, which is either the terminal (keyboard)
+ * or stdin. Only use in main because of the dependency on term_in.
+ */
+#ifdef _WIN32
+#define GETCH() (term_in ? _getch() : getchar())
+#else
+#define GETCH() getchar()
+#endif
+
+/* Log file template */
+#define LOGTEMPLATE ".spot_log_XXXXXX"
+
+/* Templates for files used by sed */
+#define CLTEMPLATE ".c_XXXXXX"
+#define INTEMPLATE ".i_XXXXXX"
+#define OUTTEMPLATE ".o_XXXXXX"
+#define ERRTEMPLATE ".e_XXXXXX"
+
+#ifdef _WIN32
+#define SEDSTR "sed -C -b -r -f"
+#else
+#define SEDSTR "LC_ALL=C sed -r -f"
+#endif
+
+/* Max sed command size including trailing \0 character */
+#define MAXCMD 200
+
+/*
+ * Default gap size. Must be at least 1.
+ * It is good to set small while testing, but BUFSIZ is a sensible choice for
+ * real use (to limit the expense of growing the gap).
+ */
+#define GAP 2
+
+/* Default number of spare text buffer pointers. Must be at least 1 */
+#define SPARETB 10
+
+/*
+ * End Of Buffer CHaracter. This cannot be deleted, but will not be written to
+ * file.
+ */
+#define EOBCH '~'
 
 /* size_t integer overflow tests */
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
