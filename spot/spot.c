@@ -1666,7 +1666,7 @@ int main(int argc, char **argv)
     size_t h = 0, w = 0;      /* Screen height and width (real) */
     size_t new_h, new_w;      /* New screen height and width (real) */
     size_t cy, cx;            /* Cursor's screen coordinates */
-    struct tb *z;             /* The text buffers */
+    struct tb *z = NULL;      /* The text buffers */
     struct buffer *cl = NULL; /* Command line buffer */
     int cla = 0;              /* Command line buffer is active */
     /* Operation for which the command line is being used */
