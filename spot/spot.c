@@ -183,6 +183,9 @@
 /* Delete */
 #define DCH() (b->c++)
 
+/* Global log file used indicator (logging may not be successful) */
+int log_file_used = 0;
+
 /* Global log file pointer */
 FILE *logfp = NULL;
 
@@ -193,6 +196,7 @@ FILE *logfp = NULL;
 #define LOG(m) do {                                                \
     fprintf(LFP, "%s: %s: %d: %s\n", __FILE__, func, __LINE__, m); \
     fflush(LFP);                                                   \
+    if (logfp != NULL) log_file_used = 1;                          \
 } while (0)
 
 /* Log an error message with errno */
@@ -200,6 +204,7 @@ FILE *logfp = NULL;
     fprintf(LFP, "%s: %s: %d: %s: %s\n", __FILE__, func, __LINE__, m, \
         strerror(errno));                                             \
     fflush(LFP);                                                      \
+    if (logfp != NULL) log_file_used = 1;                             \
 } while (0)
 
 /*
@@ -2016,17 +2021,20 @@ clean_up:
     free(cl_str);
     free(ns);
     free(cs);
-    free(logfn);
     free(clfn);
     free(infn);
     free(outfn);
     free(errfn);
     /* Close log file */
     errno = 0;
-    if (fclose(logfp)) {
-        fprintf(stderr, "%s: %s: %d: %s\n", __FILE__, func, __LINE__,
-            "failed to close log file");
+    if (logfp != NULL && fclose(logfp)) {
+        logfp = NULL; /* So that LOGE uses stderr */
+        LOGE("failed to close log file");
         ret = 1;
     }
+    /* Delete log file if not used */
+    if (!log_file_used) RM(logfn);
+    else fprintf(stderr, "%s: check log file: %s\n", *argv, logfn);
+    free(logfn);
     return ret;
 }
