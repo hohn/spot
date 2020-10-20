@@ -727,7 +727,7 @@ struct buffer *init_buffer(size_t req)
     char *func = "init_buffer";
     struct buffer *b;
     LMALLOC(b, sizeof(struct buffer), 0, 1, fail);
-    LMALLOC(b->a, sizeof(struct buffer), req, GAP, fail1);
+    LMALLOC(b->a, req, GAP, 1, fail1);
     b->fn = NULL;
     b->g = b->a;
     *(b->e = b->a + req + GAP - 1) = EOBCH;
