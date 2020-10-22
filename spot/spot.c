@@ -39,7 +39,7 @@
  */
 
 #ifdef __linux__
-#define _DEFAULT_SOURCE
+#define _XOPEN_SOURCE 500
 #endif
 
 #include <sys/types.h>
@@ -135,13 +135,13 @@
 #endif
 
 /* Log file template */
-#define LOGTEMPLATE ".spot_log_XXXXXX"
+#define LOGTEMPLATE ".spot_log_XXXXXXXXXX"
 
 /* Templates for files used by sed */
-#define CLTEMPLATE ".c_XXXXXX"
-#define INTEMPLATE ".i_XXXXXX"
-#define OUTTEMPLATE ".o_XXXXXX"
-#define ERRTEMPLATE ".e_XXXXXX"
+#define CLTEMPLATE ".c_XXXXXXXXXX"
+#define INTEMPLATE ".i_XXXXXXXXXX"
+#define OUTTEMPLATE ".o_XXXXXXXXXX"
+#define ERRTEMPLATE ".e_XXXXXXXXXX"
 
 #ifdef _WIN32
 #define SEDSTR "sed -C -b -r -f"
@@ -149,8 +149,10 @@
 #define SEDSTR "LC_ALL=C sed -r -f"
 #endif
 
+#define SEDFORMAT "%s %s %s 1> %s 2> %s"
+
 /* Max sed command size including trailing \0 character */
-#define MAXCMD 200
+#define SEDMAXCMD 100
 
 /*
  * Default gap size. Must be at least 1.
@@ -246,76 +248,60 @@ FILE *logfp = NULL;
  * Wrapper macros that perform logging and jump to a label (lb) upon error.
  * They do not set ret. Useful for creating an error handling goto chain.
  */
-#define SAFEADD(r, a, b, lb) do {                       \
-    if (AOF(a, b)) {                                    \
+#define SAFEADD(r, a, b, on_fail) do { \
+    if (AOF(a, b)) { \
         LOG("SAFEADD macro: size_t addition overflow"); \
-        goto lb;                                        \
-    }                                                   \
-    r = (a) + (b);                                      \
+        on_fail; \
+    } \
+    r = (a) + (b); \
 } while (0)
 
-#define SAFEMULT(r, a, b, lb) do {                             \
-    if (MOF(a, b)) {                                           \
+#define SAFEMULT(r, a, b, on_fail) do { \
+    if (MOF(a, b)) { \
         LOG("SAFEMULT macro: size_t multiplication overflow"); \
-        goto lb;                                               \
-    }                                                          \
-    r = (a) * (b);                                             \
+        on_fail; \
+    } \
+    r = (a) * (b); \
 } while (0)
 
-#define LMALLOC(p, a, b, add, lb) do {                            \
-    if (add) {                                                    \
-        if (AOF(a, b)) {                                          \
-            LOG("LMALLOC macro: size_t addition overflow");       \
-            goto lb;                                              \
-        }                                                         \
-        errno = 0;                                                \
-        if ((p = malloc((a) + (b))) == NULL) {                    \
-            LOGE("LMALLOC macro: malloc failed");                 \
-            goto lb;                                              \
-        }                                                         \
-    } else {                                                      \
-        if (MOF(a, b)) {                                          \
-            LOG("LMALLOC macro: size_t multiplication overflow"); \
-            goto lb;                                              \
-        }                                                         \
-        errno = 0;                                                \
-        if ((p = malloc((a) * (b))) == NULL) {                    \
-            LOGE("LMALLOC macro: malloc failed");                 \
-            goto lb;                                              \
-        }                                                         \
-    }                                                             \
+#define LMALLOC(p, s, on_fail) do { \
+    errno = 0; \
+    if ((p = malloc(s)) == NULL) { \
+        LOGE("LMALLOC macro: malloc failed"); \
+        on_fail; \
+    } \
 } while (0)
 
-#define LFOPEN(fp, fn, mode, lb) do {       \
-    errno = 0;                              \
-    if ((fp = fopen(fn, mode)) == NULL) {   \
+#define LFOPEN(fp, fn, mode, on_fail) do { \
+    errno = 0; \
+    if ((fp = fopen(fn, mode)) == NULL) { \
         LOGE("LFOPEN macro: fopen failed"); \
-        goto lb;                            \
-    }                                       \
+        on_fail; \
+    } \
 } while (0)
 
-#define LFREAD(p, fs, fp, lb) do {                               \
-    errno = 0;                                                   \
-    if (fread(p, 1, fs, fp) != fs) {                             \
-        if (ferror(fp)) LOGE("LFREAD macro: fread failed");      \
+#define LFREAD(p, fs, fp, on_fail) do { \
+    errno = 0; \
+    if (fread(p, 1, fs, fp) != fs) { \
+        if (ferror(fp)) LOGE("LFREAD macro: fread failed"); \
         else if (feof(fp)) LOGE("LFREAD macro: fread read EOF"); \
-        goto lb;                                                 \
-    }                                                            \
+        on_fail; \
+    } \
 } while (0)
 
-#define LFWRITE(p, s, fp, lb) do {           \
-    if (fwrite(p, 1, s, fp) != s) {          \
+#define LFWRITE(p, s, fp, on_fail) do { \
+    if (fwrite(p, 1, s, fp) != s) { \
         LOG("LFWRITE macro: fwrite failed"); \
-        goto lb;                             \
-    }                                        \
+        on_fail; \
+    } \
 } while (0)
 
-#define LFCLOSE(fp, lb) do {                  \
-    errno = 0;                                \
-    if (fclose(fp)) {                         \
+#define LFCLOSE(fp, on_fail) do { \
+    errno = 0; \
+    if (fclose(fp)) { \
         LOGE("LFCLOSE macro: fclose failed"); \
-        goto lb;                              \
-    }                                         \
+        on_fail; \
+    } \
 } while (0)
 
 /*
@@ -654,13 +640,13 @@ int grow_gap(struct buffer *b, size_t req)
     char *func = "grow_gap";
     size_t rg, min_increase, current_size, target_size, increase;
     char *t, *tc;
-    SAFEADD(rg, req, GAP, fail);
+    SAFEADD(rg, req, GAP, return 1);
     /* Only call grow_gap if req > (b->c - b->g) */
     min_increase = rg - (b->c - b->g);
     current_size = b->e - b->a + 1;
     increase = current_size > min_increase ? current_size : min_increase;
-    SAFEADD(target_size, current_size, increase, fail);
-    LMALLOC(t, target_size, 0, 1, fail);
+    SAFEADD(target_size, current_size, increase, return 1);
+    LMALLOC(t, target_size, return 1);
     memcpy(t, b->a, b->g - b->a);
     tc = t + (b->c - b->a) + increase;
     memcpy(tc, b->c, b->e - b->c + 1);
@@ -670,8 +656,6 @@ int grow_gap(struct buffer *b, size_t req)
     free(b->a);
     b->a = t;
     return 0;
-fail:
-    return 1;
 }
 
 int insert_char(struct buffer *b, char ch, size_t mult)
@@ -726,11 +710,13 @@ struct buffer *init_buffer(size_t req)
      */
     char *func = "init_buffer";
     struct buffer *b;
-    LMALLOC(b, sizeof(struct buffer), 0, 1, fail);
-    LMALLOC(b->a, req, GAP, 1, fail1);
+    size_t rg;
+    SAFEADD(rg, req, GAP, return NULL);
+    LMALLOC(b, sizeof(struct buffer), return NULL);
+    LMALLOC(b->a, rg, goto fail1);
     b->fn = NULL;
     b->g = b->a;
-    *(b->e = b->a + req + GAP - 1) = EOBCH;
+    *(b->e = b->a + rg - 1) = EOBCH;
     b->c = b->e;
     b->d = 0;
     b->m = 0;
@@ -738,7 +724,6 @@ struct buffer *init_buffer(size_t req)
     return b;
 fail1:
     free(b);
-fail:
     return NULL;
 }
 
@@ -756,17 +741,17 @@ struct tb *init_tb(size_t req)
     /* Initialises structure to keep track of the text buffers */
     char *func = "init_tb";
     struct tb *z;
-    size_t n;
-    LMALLOC(z, sizeof(struct tb), 0, 1, fail);
-    SAFEADD(n, req, SPARETB, fail1);
-    LMALLOC(z->z, n, sizeof(struct buffer *), 0, fail1);
+    size_t n, s;
+    SAFEADD(n, req, SPARETB, return NULL);
+    SAFEMULT(s, n, sizeof(struct buffer *), return NULL);
+    LMALLOC(z, sizeof(struct tb), return NULL);
+    LMALLOC(z->z, s, goto fail1);
     z->n = n;
     z->u = 0;
     z->a = 0;
     return z;
 fail1:
     free(z);
-fail:
     return NULL;
 }
 
@@ -784,13 +769,11 @@ struct mem *init_mem(void)
 {
     char *func = "init_mem";
     struct mem *p;
-    LMALLOC(p, sizeof(struct mem), 0, 1, fail);
+    LMALLOC(p, sizeof(struct mem), return NULL);
     p->p = NULL;
     p->u = 0;
     p->s = 0;
     return p;
-fail:
-    return NULL;
 }
 
 void free_mem(struct mem *p)
@@ -842,15 +825,14 @@ int insert_file(struct buffer *b, char *fn)
         LOG("grow_gap failed");
         return 1;
     }
-    LFOPEN(fp, fn, "rb", fail);
-    LFREAD(b->c - fs, fs, fp, fail1);
-    LFCLOSE(fp, fail);
+    LFOPEN(fp, fn, "rb", return 1);
+    LFREAD(b->c - fs, fs, fp, goto fail1);
+    LFCLOSE(fp, return 1);
     b->c -= fs;
     b->m_set = 0;
     return 0;
 fail1:
-    LFCLOSE(fp, fail);
-fail:
+    LFCLOSE(fp, return 1);
     return 1;
 }
 
@@ -878,10 +860,10 @@ int replace_region(struct buffer *b, char *fn)
     }
     if (!fs) return 0;
     /* Get temporary memory */
-    LMALLOC(t, fs, 0, 1, fail);
-    LFOPEN(fp, fn, "rb", fail1);
-    LFREAD(t, fs, fp, fail2);
-    LFCLOSE(fp, fail1);
+    LMALLOC(t, fs, return 1);
+    LFOPEN(fp, fn, "rb", goto fail1);
+    LFREAD(t, fs, fp, goto fail2);
+    LFCLOSE(fp, goto fail1);
     /* The current region will be recycled */
     if (fs > reg_s && fs - reg_s > (size_t) (b->c - b->g)
         && grow_gap(b, fs - reg_s)) {
@@ -903,10 +885,9 @@ int replace_region(struct buffer *b, char *fn)
     free(t);
     return 0;
 fail2:
-    LFCLOSE(fp, fail1);
+    LFCLOSE(fp, goto fail1);
 fail1:
     free(t);
-fail:
     return 1;
 }
 
@@ -919,14 +900,15 @@ int write_buffer(struct buffer *b, char *fn, int backup_req)
     char *func = "write_buffer";
     struct stat st;
     int backup_ok = 0;
-    size_t len, num;
+    size_t len, bk_s, num;
     char *backup_fn;
     FILE *fp;
     if (fn == NULL) return 1;
     /* Create backup of the regular file */
     if (backup_req && !stat(fn, &st) && st.st_mode & S_IFREG) {
         len = strlen(fn);
-        LMALLOC(backup_fn, len, 2, 1, fail);
+        SAFEADD(bk_s, len, 2, return 1);
+        LMALLOC(backup_fn, bk_s, return 1);
         memcpy(backup_fn, fn, len);
         *(backup_fn + len) = '~';
         *(backup_fn + len + 1) = '\0';
@@ -947,12 +929,12 @@ int write_buffer(struct buffer *b, char *fn, int backup_req)
         free(backup_fn);
         backup_ok = 1;
     }
-    LFOPEN(fp, fn, "wb", fail);
+    LFOPEN(fp, fn, "wb", return 1);
     num = (size_t) (b->g - b->a);
-    LFWRITE(b->a, num, fp, fail1);
+    LFWRITE(b->a, num, fp, goto fail1);
     num = (size_t) (b->e - b->c);
-    LFWRITE(b->c, num, fp, fail1);
-    LFCLOSE(fp, fail);
+    LFWRITE(b->c, num, fp, goto fail1);
+    LFCLOSE(fp, return 1);
 #ifndef _WIN32
     if (backup_ok && chmod(fn, st.st_mode & 0777)) {
         LOG("chmod failed");
@@ -961,8 +943,7 @@ int write_buffer(struct buffer *b, char *fn, int backup_req)
 #endif
     return 0;
 fail1:
-    LFCLOSE(fp, fail);
-fail:
+    LFCLOSE(fp, return 1);
     return 1;
 }
 
@@ -970,7 +951,7 @@ int rename_buffer(struct buffer *b, char *new_name)
 {
     /* Sets or changes the filename associated with a buffer */
     char *func = "rename_buffer";
-    size_t len;
+    size_t len, s;
     char *t;
     if (new_name == NULL) {
         LOG("new name is NULL");
@@ -981,14 +962,13 @@ int rename_buffer(struct buffer *b, char *new_name)
         LOG("new name is an empty string");
         return 1;
     }
-    LMALLOC(t, len, 1, 1, fail);
+    SAFEADD(s, len, 1, return 1);
+    LMALLOC(t, s, return 1);
     memcpy(t, new_name, len);
     *(t + len) = '\0';
     free(b->fn);
     b->fn = t;
     return 0;
-fail:
-    return 1;
 }
 
 int buffer_to_str(struct buffer *b, char **p_to_str)
@@ -997,7 +977,7 @@ int buffer_to_str(struct buffer *b, char **p_to_str)
     char *t, *q, ch, *p;
     /* OK to add one because of EOBCH */
     size_t s = b->g - b->a + b->e - b->c + 1;
-    LMALLOC(t, s, 0, 1, fail);
+    LMALLOC(t, s, return 1);
     p = t;
     /* Strip out \0 chars */
     q = b->a;
@@ -1008,8 +988,6 @@ int buffer_to_str(struct buffer *b, char **p_to_str)
     free(*p_to_str);
     *p_to_str = t;
     return 0;
-fail:
-    return 1;
 }
 
 int buffer_to_mem(struct buffer *b, struct mem *m)
@@ -1020,7 +998,7 @@ int buffer_to_mem(struct buffer *b, struct mem *m)
     size_t s = s_bg + s_ag;    /* Text size of buffer */
     char *t;                   /* Temporary pointer */
     if (s > m->s) {
-        LMALLOC(t, s, 0, 1, fail);
+        LMALLOC(t, s, return 1);
         free(m->p);
         m->p = t;
         m->s = s;
@@ -1029,8 +1007,6 @@ int buffer_to_mem(struct buffer *b, struct mem *m)
     memcpy(m->p + s_bg, b->c, s_ag);
     m->u = s;
     return 0;
-fail:
-    return 1;
 }
 
 void set_mark(struct buffer *b)
@@ -1051,20 +1027,19 @@ int write_region(struct buffer *b, char *fn)
         return 1;
     }
     if (b->m == ci) return 0; /* Empty region, nothing to do */
-    LFOPEN(fp, fn, "wb", fail);
+    LFOPEN(fp, fn, "wb", return 1);
     /* Mark before cursor */
     if (b->m < ci) {
         num = (size_t) (b->g - b->a) - b->m;
-        LFWRITE(b->a, num, fp, fail1);
+        LFWRITE(b->a + b->m, num, fp, goto fail1);
     } else {
         num = b->m - (size_t) (b->c - b->a);
-        LFWRITE(b->c, num, fp, fail1);
+        LFWRITE(b->c, num, fp, goto fail1);
     }
-    LFCLOSE(fp, fail);
+    LFCLOSE(fp, return 1);
     return 0;
 fail1:
-    LFCLOSE(fp, fail);
-fail:
+    LFCLOSE(fp, return 1);
     return 1;
 }
 
@@ -1082,7 +1057,7 @@ int copy_region(struct buffer *b, struct mem *p, int del)
     if (b->m < ci) {
         s = ci - b->m;
         if (s > p->s) {
-            LMALLOC(t, s, 0, 1, fail);
+            LMALLOC(t, s, return 1);
             free(p->p);
             p->p = t;
             p->s = s;
@@ -1093,7 +1068,7 @@ int copy_region(struct buffer *b, struct mem *p, int del)
     } else {
         s = b->m - ci;
         if (s > p->s) {
-            LMALLOC(t, s, 0, 1, fail);
+            LMALLOC(t, s, return 1);
             free(p->p);
             p->p = t;
             p->s = s;
@@ -1104,15 +1079,13 @@ int copy_region(struct buffer *b, struct mem *p, int del)
     }
     b->m_set = 0;
     return 0;
-fail:
-    return 1;
 }
 
 int paste(struct buffer *b, struct mem *p, size_t mult)
 {
     char *func = "paste";
     size_t s;
-    SAFEMULT(s, p->u, mult, fail);
+    SAFEMULT(s, p->u, mult, return 1);
     if (s > (size_t) (b->c - b->g) && grow_gap(b, s)) {
         LOG("grow_gap failed");
         return 1;
@@ -1123,13 +1096,12 @@ int paste(struct buffer *b, struct mem *p, size_t mult)
     }
     b->m_set = 0;
     return 0;
-fail:
-    return 1;
 }
 
 int cut_to_eol(struct buffer *b, struct mem *p)
 {
     char *func = "cut_to_eol";
+    if (*b->c == '\n') return delete_char(b, 1);
     set_mark(b);
     end_of_line(b);
     if (copy_region(b, p, 1)) {
@@ -1520,8 +1492,8 @@ int new_buffer(struct tb *z, char *fn)
     struct buffer *b;  /* Buffer shortcut */
     /* Grow to take more text buffers */
     if(z->u == z->n) {
-        SAFEADD(new_n, z->u, SPARETB, fail);
-        SAFEMULT(new_s, new_n, sizeof(struct buffer *), fail);
+        SAFEADD(new_n, z->u, SPARETB, return 1);
+        SAFEMULT(new_s, new_n, sizeof(struct buffer *), return 1);
         errno = 0;
         if ((t = realloc(z->z, new_s)) == NULL) {
             LOGE("realloc failed");
@@ -1572,21 +1544,20 @@ int new_buffer(struct tb *z, char *fn)
     z->a = z->u; /* Make the active text buffer the new text buffer */
     ++z->u;      /* Increase the number of used text buffers */
     return 0;
-fail:
-    return 1;
 }
 
 char *make_temp_file(char *template)
 {
     char *func = "make_temp_file";
     char *t;
-    size_t len = strlen(template);
+    size_t len = strlen(template), s;
 #ifdef _WIN32
     HANDLE fh;
 #else
     int fd;
 #endif
-    LMALLOC(t, len, 1, 1, fail);
+    SAFEADD(s, len, 1, return NULL);
+    LMALLOC(t, s, return NULL);
     memcpy(t, template, len);
     *(t + len) = '\0';
 
@@ -1613,8 +1584,6 @@ char *make_temp_file(char *template)
 #endif
 
     return t;
-fail:
-    return NULL;
 }
 
 int main(int argc, char **argv)
@@ -1656,7 +1625,7 @@ int main(int argc, char **argv)
     char *infn = NULL;        /* Sed input filename */
     char *outfn = NULL;       /* Sed output filename */
     char *errfn = NULL;       /* Sed error filename */
-    char sedcmd[MAXCMD];      /* Sed command */
+    char sedcmd[SEDMAXCMD];      /* Sed command */
     int regex_ok = 0;         /* Last regex completed successfully */
     char *t;                  /* Temporary pointer */
     size_t i;                 /* Generic index */
@@ -1683,8 +1652,7 @@ int main(int argc, char **argv)
         QUIT("failed to make sed error file");
 
     /* Create sed command */
-    snprintf(sedcmd, MAXCMD, "%s %s %s 1> %s 2> %s",
-        SEDSTR, clfn, infn, outfn, errfn);
+    snprintf(sedcmd, SEDMAXCMD, SEDFORMAT, SEDSTR, clfn, infn, outfn, errfn);
 
     /* Ignore interrupt, sent by ^C */
     errno = 0;
