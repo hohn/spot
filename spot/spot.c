@@ -65,9 +65,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * KEY BINDINGS
- */
+/* KEY BINDINGS */
 
 /* Changing modes */
 #define CMDMODE '\t'
@@ -195,18 +193,18 @@ FILE *logfp = NULL;
 #define LFP (logfp == NULL ? stderr : logfp)
 
 /* Log an error message without errno */
-#define LOG(m) do {                                                \
+#define LOG(m) do { \
     fprintf(LFP, "%s: %s: %d: %s\n", __FILE__, func, __LINE__, m); \
-    fflush(LFP);                                                   \
-    if (logfp != NULL) log_file_used = 1;                          \
+    fflush(LFP); \
+    if (logfp != NULL) log_file_used = 1; \
 } while (0)
 
 /* Log an error message with errno */
-#define LOGE(m) do {                                                  \
+#define LOGE(m) do { \
     fprintf(LFP, "%s: %s: %d: %s: %s\n", __FILE__, func, __LINE__, m, \
-        strerror(errno));                                             \
-    fflush(LFP);                                                      \
-    if (logfp != NULL) log_file_used = 1;                             \
+        strerror(errno)); \
+    fflush(LFP); \
+    if (logfp != NULL) log_file_used = 1; \
 } while (0)
 
 /*
@@ -215,29 +213,29 @@ FILE *logfp = NULL;
  * Only use in main.
  */
 #define QUIT(m) do { \
-    LOG(m);          \
-    ret = 1;         \
-    goto clean_up;   \
+    LOG(m); \
+    ret = 1; \
+    goto clean_up; \
 } while (0)
 
 /* Same as above but with errno */
 #define QUITE(m) do { \
-    LOGE(m);          \
-    ret = 1;          \
-    goto clean_up;    \
+    LOGE(m); \
+    ret = 1; \
+    goto clean_up; \
 } while (0)
 
 /*
  * Deletes a file with error logging. Does not set ret to failure.
  * Does not log an error if the file does not exist.
  */
-#define RM(fn) do {                          \
-    if (fn != NULL) {                        \
-        errno = 0;                           \
+#define RM(fn) do { \
+    if (fn != NULL) { \
+        errno = 0; \
         if (remove(fn) && errno != ENOENT) { \
             LOGE("RM macro: remove failed"); \
-        }                                    \
-    }                                        \
+        } \
+    } \
 } while (0)
 
 /* size_t integer overflow tests */
@@ -1165,7 +1163,6 @@ int setup_graphics(void)
 }
 #endif
 
-
 int get_screen_size(size_t *height, size_t *width)
 {
     /* Gets the screen size */
@@ -1582,7 +1579,6 @@ char *make_temp_file(char *template)
         return NULL;
     }
 #endif
-
     return t;
 }
 
