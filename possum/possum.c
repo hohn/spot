@@ -33,6 +33,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Set paths to the dependencies */
+#ifdef _WIN32
+#define EFN "C:\\Users\\logan\\bin\\exiftool-12.07\\exiftool.exe"
+#define JFN "C:\\Users\\logan\\bin\\jdupes-1.18.2-win64\\jdupes.exe"
+#else
+#define EFN "/usr/local/bin/exiftool"
+#define JFN "/home/logan/bin/jdupes"
+#endif
+
 /* Log without errno */
 #define LOG(m) fprintf(stderr, "%s: %s: %d: %s\n", __FILE__, func, __LINE__, m)
 /* Log with errno */
@@ -216,14 +225,6 @@ int main(int argc, char **argv)
 {
     char *func = "main";
 
-#ifdef _WIN32
-    char *efn = "C:\\Users\\logan\\bin\\exiftool-12.07\\exiftool.exe";
-    char *jfn = "C:\\Users\\logan\\bin\\jdupes-1.18.2-win64\\jdupes.exe";
-#else
-    char *efn = "/usr/local/bin/exiftool";
-    char *jfn = "/home/logan/bin/jdupes";
-#endif
-
     char *eav[] = { "exiftool", "-r", "-FileName<CreateDate", "-d", NULL,
         "-ext", "heic", "-ext", "jpg", "-ext", "jpeg",
         "-ext", "mov", "-ext", "mp4",
@@ -256,7 +257,7 @@ int main(int argc, char **argv)
     *(eav + 4) = df;
     *(eav + 15) = search_dir;
 
-    if (run_program(efn, eav)) {
+    if (run_program(EFN, eav)) {
         LOG("exiftool failed to move media with exif dates");
         free(df);
         return 1;
@@ -271,7 +272,7 @@ int main(int argc, char **argv)
     *(eav2 + 4) = df2;
     *(eav2 + 15) = search_dir;
 
-    if (run_program(efn, eav2)) {
+    if (run_program(EFN, eav2)) {
         LOG("exiftool failed to move media with no exif dates");
         free(df2);
         return 1;
@@ -280,7 +281,7 @@ int main(int argc, char **argv)
     free(df2);
 
     *(jav + 4) = store_dir;
-    if (run_program(jfn, jav)) {
+    if (run_program(JFN, jav)) {
         LOG("jdupes failed");
         return 1;
     }
