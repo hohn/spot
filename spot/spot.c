@@ -34,7 +34,6 @@
  * - Uses the gap buffer method for text with transactional operations.
  * - Uses the Quick Search algorithm with a reusable bad character table on
      repeated searches.
- * - Is a comfortable modal editor (the key bindings are below).
  * - Can receive keys from a pipe.
  */
 
@@ -65,62 +64,71 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* KEY BINDINGS */
+/* Convert lowercase letter to control character */
+#define C(c) ((c) - 'a' + 1)
+#define Cx C('x')
+/* Control spacebar */
+#define Cspc 0
+#define ESC 27
 
-/* Changing modes */
-#define CMDMODE '\t'
-#define INSERTMODE 'i'
-
-/* Command keys */
+/*
+ * KEY BINDINGS
+ */
+#define SETMARK Cspc
+/* Command multiplier */
+#define CMDMULT C('u')
 /* Previous */
-#define UP 'p'
+#define UP C('p')
 /* Next */
-#define DOWN 'n'
+#define DOWN C('n')
 /* Backwards */
-#define LEFT 'b'
+#define LEFT C('b')
 /* Forwards */
-#define RIGHT 'f'
+#define RIGHT C('f')
 /* Antes */
-#define HOME 'a'
-#define ENDLINE 'e'
-#define DEL 'd'
-#define BKSPACE 'h'
-#define SETMARK 'm'
-#define NEWLINE 'j'
-#define COPY 'c'
+#define HOME C('a')
+#define ENDLINE C('e')
+#define DEL C('d')
+#define BKSPACE C('h')
 /* Wipe */
-#define CUT 'w'
+#define CUT C('w')
 /* Yank */
-#define PASTE 'y'
-/* Kill */
-#define CUTTOEOL 'k'
-/* Uproot */
-#define CUTTOSOL 'u'
-#define SEARCH '/'
-#define REPSEARCH '\\'
+#define PASTE C('y')
+/* Kill. Uproot when command multiplier is zero */
+#define CUTTOEOL C('k')
+#define SEARCH C('s')
 /* Level cursor on screen */
-#define CENTRE 'l'
-#define REDRAW '-'
+#define CENTRE C('l')
 /* Deactivates the mark or exits the command line */
-#define CMDEXIT 'g'
-#define CLEXEC ';'
-#define STARTBUF ','
-#define ENDBUF '.'
-#define TRIMCLEAN 't'
-#define MATCHBRACE '='
-#define SAVE 's'
-#define RENAME 'r'
-#define INSERTFILE 'z'
+#define CMDEXIT C('g')
+#define TRIMCLEAN C('t')
+/* Quote hex */
+#define INSERTHEX C('q')
+
+/*
+ * Cx prefix
+ */
+#define SAVE C('s')
+#define INSERTFILE 'i'
+#define RENAME C('w')
 /* Open file */
-#define NEWBUF 'o'
-#define LEFTBUF '['
-#define RIGHTBUF ']'
+#define NEWBUF C('f')
+/* Close without prompting to save */
+#define CLOSE C('c')
+/* Left arrow key moves left one buffer */
+/* Right arrow key moves right one buffer */
+
+/*
+ * ESC prefix (Alt or Meta)
+ */
+#define COPY 'w'
+#define REPSEARCH '/'
+#define REDRAW '-'
+#define STARTBUF '<'
+#define ENDBUF '>'
+#define MATCHBRACE '='
 #define REGEXREG 'x'
 #define UNDOREGEX 'X'
-/* Quote hex */
-#define INSERTHEX 'q'
-/* Close without prompting to save */
-#define CLOSE '!'
 
 /*
  * Get a character from the input, which is either the terminal (keyboard)
@@ -1243,7 +1251,7 @@ void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
      * Pointer to the draw start postion that results in the cursor being centred.
      * Only used when centreing is not planned.
      */
-    char *q_centre;
+    char *q_centre = NULL;
 
     /*
      * If the cursor is at the start of the buffer, then must
@@ -1594,7 +1602,7 @@ int main(int argc, char **argv)
     struct buffer *cl = NULL; /* Command line buffer */
     int cla = 0;              /* Command line buffer is active */
     /* Operation for which the command line is being used */
-    char operation = '\0';
+    char operation = '\0', operation_copy = '\0';
     char *cl_str = NULL;      /* Command line buffer converted to a string */
     /* Bad character table for the Quick Search algorithm */
     size_t bad[UCHAR_MAX + 1];
@@ -1610,8 +1618,6 @@ int main(int argc, char **argv)
     size_t sa = 0;            /* Terminal screen area (real) */
     /* Keyboard key (one physical key can send multiple) */
     int key;
-    int sk;                   /* Special key indicator */
-    int cmd_mode = 1;         /* Command mode indicator */
     int digit;                /* Numerical digit */
     unsigned char hex[2];     /* Hexadecimal array */
     int term_in = 0;          /* Terminal input */
@@ -1651,8 +1657,8 @@ int main(int argc, char **argv)
     snprintf(sedcmd, SEDMAXCMD, SEDFORMAT, SEDSTR, clfn, infn, outfn, errfn);
 
     /* Ignore interrupt, sent by ^C */
-    errno = 0;
-    if (signal(SIGINT, SIG_IGN) == SIG_ERR) QUITE("cannot ignore SIGINT");
+/*    errno = 0;
+    if (signal(SIGINT, SIG_IGN) == SIG_ERR) QUITE("cannot ignore SIGINT"); */
 
     /* See if input is from a terminal */
 #ifdef _WIN32
@@ -1667,9 +1673,10 @@ int main(int argc, char **argv)
         errno = 0;
         if (tcgetattr(STDIN_FILENO, &term_orig))
             QUITE("cannot get terminal attributes");
+
         term_new = term_orig;
-        term_new.c_lflag &= ~ICANON; /* Raw input (no line buffering) */
-        term_new.c_lflag &= ~ECHO;   /* No echoing of input */
+        cfmakeraw(&term_new);
+
         errno = 0;
         if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new))
             QUITE("cannot set terminal attributes");
@@ -1706,7 +1713,7 @@ int main(int argc, char **argv)
     /* Editor loop */
     while (running) {
 
-/* Top of the editor loop */
+    /* Top of the editor loop */
 top:
         if (get_screen_size(&new_h, &new_w)) QUIT("failed to get screen size");
 
@@ -1755,12 +1762,11 @@ top:
         /* Shortcut to the cursor's buffer */
         cb = cla ? cl : *(z->z + z->a);
 
-        key = GETCH(); /* Get the first key */
-
         mult = 1; /* Reset command multiplier */
-        if (cmd_mode) {
+        if ((key = GETCH()) == CMDMULT) {
             /* Read multiplier number */
-            mult = 0; /* mult will not remain zero */
+            mult = 0;
+            key = GETCH();
             while (isdigit(key)) {
                 if (MOF(mult, 10)) {
                     LOG("command multiplier: size_t multiplication overflow");
@@ -1777,187 +1783,198 @@ top:
                 mult += digit;
                 key = GETCH();
             }
-            if (!mult) mult = 1; /* Default is to perform a command once */
         }
-
-        sk = 0; /* Clear special key indicator */
 
         /* Remap special keyboard keys */
 #ifdef _WIN32
         if (key == 0xE0) {
             key = GETCH();
             switch(key) {
-            case 'H': key = UP; sk = 1; break;
-            case 'P': key = DOWN; sk = 1; break;
-            case 'K': key = LEFT; sk = 1; break;
-            case 'M': key = RIGHT; sk = 1; break;
-            case 'S': key = DEL; sk = 1; break;
-            case 'G': key = HOME; sk = 1; break;
-            case 'O': key = ENDLINE; sk = 1; break;
-            }
-        }
-#else
-        if (key == 0x1B && (key = GETCH()) == '[') {
-            key = GETCH();
-            switch(key) {
-            case 'A': key = UP; sk = 1; break;
-            case 'B': key = DOWN; sk = 1; break;
-            case 'D': key = LEFT; sk = 1; break;
-            case 'C': key = RIGHT; sk = 1; break;
-            case '3': if ((key = GETCH()) == '~') key = DEL; sk = 1; break;
-            case 'H': key = HOME; sk = 1; break;
-            case 'F': key = ENDLINE; sk = 1; break;
+            case 'H': key = UP; break;
+            case 'P': key = DOWN; break;
+            case 'K': key = LEFT; break;
+            case 'M': key = RIGHT; break;
+            case 'S': key = DEL; break;
+            case 'G': key = HOME; break;
+            case 'O': key = ENDLINE; break;
             }
         }
 #endif
 
-        /* Remap Backspace key */
-        if (key == 8 || key == 0x7F) {
-            key = BKSPACE;
-            sk = 1;
-        }
-
-        /* Remap Enter key */
-        if (key == '\n' || key == '\r') {
-            key = NEWLINE;
-            sk = 1;
-        }
-
-        /* Special keys work in command mode and insert mode */
-        if (cmd_mode || sk) {
+        if (key == ESC) {
+            key = GETCH();
             switch (key) {
-            case LEFT: cr = move_left(cb, mult); goto top;
-            case RIGHT: cr = move_right(cb, mult); goto top;
-            case UP: cr = up_line(cb, mult); goto top;
-            case DOWN: cr = down_line(cb, mult); goto top;
-            case HOME: start_of_line(cb); goto top;
-            case ENDLINE: end_of_line(cb); goto top;
-            case DEL: cr = delete_char(cb, mult); goto top;
-            case BKSPACE: cr = backspace_char(cb, mult); goto top;
-            case NEWLINE: cr = insert_char(cb, '\n', mult); goto top;
+            case STARTBUF: start_of_buffer(cb); goto top;
+            case ENDBUF: end_of_buffer(cb); goto top;
+            case REPSEARCH: cr = search(cb, se, bad); goto top;
+            case MATCHBRACE: cr = match_brace(cb); goto top;
+            case COPY: cr = copy_region(cb, p, 0); goto top;
+            case REDRAW: redraw = 1; goto top;
+            case REGEXREG: delete_buffer(cl); cla = 1; operation = 'X'; goto top;
+            case UNDOREGEX: if (regex_ok) cr = replace_region(cb, infn); goto top;
+#ifndef _WIN32
+            case '[':
+                key = GETCH();
+                switch(key) {
+                case 'A': key = UP; break;
+                case 'B': key = DOWN; break;
+                case 'D': key = LEFT; break;
+                case 'C': key = RIGHT; break;
+                case '3': if ((key = GETCH()) == '~') key = DEL; break;
+                case 'H': key = HOME; break;
+                case 'F': key = ENDLINE; break;
+                }
+                break;
+#endif
             }
         }
 
-        /* Command mode only */
-        if (cmd_mode) {
+        /* Remap Backspace key */
+        if (key == 8 || key == 0x7F) key = BKSPACE;
+
+        /* Remap carriage return */
+        if (key == '\r') key = '\n';
+
+        switch (key) {
+        case LEFT: cr = move_left(cb, mult); goto top;
+        case RIGHT: cr = move_right(cb, mult); goto top;
+        case UP: cr = up_line(cb, mult); goto top;
+        case DOWN: cr = down_line(cb, mult); goto top;
+        case HOME: start_of_line(cb); goto top;
+        case ENDLINE: end_of_line(cb); goto top;
+        case DEL: cr = delete_char(cb, mult); goto top;
+        case BKSPACE: cr = backspace_char(cb, mult); goto top;
+        case TRIMCLEAN: trim_clean(cb); goto top;
+        case SETMARK: set_mark(cb); goto top;
+        case CUT: cr = copy_region(cb, p, 1); goto top;
+        case PASTE: cr = paste(cb, p, mult); goto top;
+        case CENTRE: centre = 1; goto top;
+        case SEARCH: delete_buffer(cl); cla = 1; operation = 'S'; goto top;
+        case CUTTOEOL:
+            if (!mult) cr = cut_to_sol(cb, p);
+            else cr = cut_to_eol(cb, p);
+            goto top;
+        case CMDEXIT:
+            if (cb->m_set) {
+                /* Deactivate mark */
+                cb->m_set = 0;
+            } else if (cla) {
+                /* Exit command line */
+                cla = 0;
+                operation = '\0';
+            }
+            goto top;
+        case INSERTHEX:
+            for (i = 0; i < 2; ++i) {
+                key = GETCH();
+                if (ISASCII((unsigned int) key)
+                    && isxdigit((unsigned char) key)) {
+                    if (isdigit((unsigned char) key))
+                        *(hex + i) = key - '0';
+                    else if (islower((unsigned char) key))
+                        *(hex + i) = 10 + key - 'a';
+                    else if (isupper((unsigned char) key))
+                        *(hex + i) = 10 + key - 'A';
+                } else {
+                    LOG("insert hex: invalid digit");
+                    cr = 1;
+                    goto top;
+                }
+            }
+            cr = insert_char(cb, *hex * 16 + *(hex + 1), mult);
+            goto top;
+        }
+
+        if (key == Cx) {
+            key = GETCH();
             switch (key) {
             case CLOSE: running = 0; break;
-            case INSERTMODE: cmd_mode = 0; break;
-            case STARTBUF: start_of_buffer(cb); break;
-            case ENDBUF: end_of_buffer(cb); break;
-            case REPSEARCH: cr = search(cb, se, bad); break;
-            case TRIMCLEAN: trim_clean(cb); break;
-            case MATCHBRACE: cr = match_brace(cb); break;
-            case SAVE: cr = write_buffer(cb, cb->fn, 1); break;
-            case SETMARK: set_mark(cb); break;
-            case COPY: cr = copy_region(cb, p, 0); break;
-            case CUT: cr = copy_region(cb, p, 1); break;
-            case PASTE: cr = paste(cb, p, mult); break;
-            case CUTTOEOL: cr = cut_to_eol(cb, p); break;
-            case CUTTOSOL: cr = cut_to_sol(cb, p); break;
-            case UNDOREGEX: if (regex_ok) cr = replace_region(cb, infn); break;
-            case CENTRE: centre = 1; break;
-            case REDRAW: redraw = 1; break;
-            case INSERTHEX:
-                for (i = 0; i < 2; ++i) {
-                    key = GETCH();
-                    if (ISASCII((unsigned int) key)
-                        && isxdigit((unsigned char) key)) {
-                        if (isdigit((unsigned char) key))
-                            *(hex + i) = key - '0';
-                        else if (islower((unsigned char) key))
-                            *(hex + i) = 10 + key - 'a';
-                        else if (isupper((unsigned char) key))
-                            *(hex + i) = 10 + key - 'A';
-                    } else {
-                        LOG("insert hex: invalid digit");
-                        cr = 1;
-                        goto top;
-                    }
-                }
-                cr = insert_char(cb, *hex * 16 + *(hex + 1), mult);
-                break;
-            case LEFTBUF: z->a ? --z->a : (cr = 1); break;
-            /* z->u must be at least one here */
-            case RIGHTBUF: z->a != z->u - 1 ? ++z->a : (cr = 1); break;
-
-            /* Command line related functions */
-            case RENAME: delete_buffer(cl); cla = 1; operation = 'R'; break;
-            case SEARCH: delete_buffer(cl); cla = 1; operation = 'S'; break;
-            case INSERTFILE: delete_buffer(cl); cla = 1; operation = 'I'; break;
-            case NEWBUF: delete_buffer(cl); cla = 1; operation = 'N'; break;
-            case REGEXREG: delete_buffer(cl); cla = 1; operation = 'X'; break;
-            case CMDEXIT:
-                if (cb->m_set) {
-                    /* Deactivate mark */
-                    cb->m_set = 0;
-                } else if (cla) {
-                    /* Exit command line */
-                    cla = 0;
-                    operation = '\0';
-                }
-                break;
-            case CLEXEC:
-                if (cla) {
-                    cla = 0;
-                    if (operation == 'R') {
-                        if (buffer_to_str(cl, &cl_str)) {
-                            cr = 1;
-                            break;
-                        }
-                        cr = rename_buffer(*(z->z + z->a), cl_str);
-                    } else if (operation == 'S') {
-                        if (buffer_to_mem(cl, se)) {
-                            cr = 1;
-                            break;
-                        }
-                        if (se->u > 1) {
-                            set_bad(bad, se);
-                        }
-                        cr = search(*(z->z + z->a), se, bad);
-                    } else if (operation == 'I') {
-                        if (buffer_to_str(cl, &cl_str)) {
-                            cr = 1;
-                            break;
-                        }
-                        cr = insert_file(*(z->z + z->a), cl_str);
-                    } else if (operation == 'N') {
-                        if (buffer_to_str(cl, &cl_str)) {
-                            cr = 1;
-                            break;
-                        }
-                        cr = new_buffer(z, cl_str);
-                    } else if (operation == 'X') {
-                        regex_ok = 0; /* Clear as may fail */
-                        if (write_buffer(cl, clfn, 0)) {
-                            cr = 1;
-                            break;
-                        }
-                        if (write_region(*(z->z + z->a), infn)) {
-                            cr = 1;
-                            break;
-                        }
-                        if (sys_cmd(sedcmd)) {
-                            cr = 1;
-                            break;
-                        }
-                        if (!(cr = replace_region(*(z->z + z->a), outfn)))
-                            regex_ok = 1;
-                    }
-                    operation = '\0';
-                }
-                break;
+            case SAVE: cr = write_buffer(cb, cb->fn, 1); goto top;
+            case RENAME: delete_buffer(cl); cla = 1; operation = 'R'; goto top;
+            case INSERTFILE: delete_buffer(cl); cla = 1; operation = 'I'; goto top;
+            case NEWBUF: delete_buffer(cl); cla = 1; operation = 'N'; goto top;
             }
-        } else {
-            /* Insert mode only */
-            if (key == CMDMODE) {
-                cmd_mode = 1;
+            /* Left and right buffer, respectively */
+#ifdef _WIN32
+            if (key == 0xE0) {
+                key = GETCH();
+                switch(key) {
+                case 'K': {z->a ? --z->a : (cr = 1); goto top;}
+                case 'M': {z->a != z->u - 1 ? ++z->a : (cr = 1); goto top;}
+                }
+            }
+#else
+            if (key == 0x1B && (key = GETCH()) == '[') {
+                key = GETCH();
+                switch(key) {
+                case 'D': {z->a ? --z->a : (cr = 1); goto top;}
+                case 'C': {z->a != z->u - 1 ? ++z->a : (cr = 1); goto top;}
+                }
+            }
+#endif
+        }
+
+        /* Execute command line */
+        if (key == '\n' && cla) {
+            cla = 0;
+            operation_copy = operation;
+            operation = '\0';
+            switch (operation_copy) {
+            case 'R':
+                if (buffer_to_str(cl, &cl_str)) {
+                    cr = 1;
+                    goto top;
+                }
+                cr = rename_buffer(*(z->z + z->a), cl_str);
+                goto top;
+            case 'S':
+                if (buffer_to_mem(cl, se)) {
+                    cr = 1;
+                    goto top;
+                }
+                if (se->u > 1) {
+                    set_bad(bad, se);
+                }
+                cr = search(*(z->z + z->a), se, bad);
+                goto top;
+            case 'I':
+                if (buffer_to_str(cl, &cl_str)) {
+                    cr = 1;
+                    goto top;
+                }
+                cr = insert_file(*(z->z + z->a), cl_str);
+                goto top;
+            case 'N':
+                if (buffer_to_str(cl, &cl_str)) {
+                    cr = 1;
+                    goto top;
+                }
+                cr = new_buffer(z, cl_str);
+                goto top;
+            case 'X':
+                regex_ok = 0; /* Clear as may fail */
+                if (write_buffer(cl, clfn, 0)) {
+                    cr = 1;
+                    goto top;
+                }
+                if (write_region(*(z->z + z->a), infn)) {
+                    cr = 1;
+                    goto top;
+                }
+                if (sys_cmd(sedcmd)) {
+                    cr = 1;
+                    goto top;
+                }
+                if (!(cr = replace_region(*(z->z + z->a), outfn)))
+                    regex_ok = 1;
                 goto top;
             }
-            if (ISASCII((unsigned int) key)
-                && (isgraph((unsigned char) key) || key == ' '))
-                cr = insert_char(cb, key, mult);
         }
+
+        if (ISASCII((unsigned int) key)
+            && (isgraph((unsigned char) key)
+                || key == ' ' || key == '\t' || key == '\n'))
+            cr = insert_char(cb, key, mult);
     }
 
 clean_up:
