@@ -34,7 +34,6 @@
  * - Uses the gap buffer method for text with transactional operations.
  * - Uses the Quick Search algorithm with a reusable bad character table on
      repeated searches.
- * - Can receive keys from a pipe.
  */
 
 #ifdef __linux__
@@ -66,15 +65,12 @@
 
 /* Convert lowercase letter to control character */
 #define C(c) ((c) - 'a' + 1)
-#define Cx C('x')
-/* Control spacebar */
-#define Cspc 0
 #define ESC 27
 
 /*
  * KEY BINDINGS
  */
-#define SETMARK Cspc
+#define SETMARK 0
 /* Command multiplier */
 #define CMDMULT C('u')
 /* Previous */
@@ -119,7 +115,7 @@
 /* Right arrow key moves right one buffer */
 
 /*
- * ESC prefix (Alt or Meta)
+ * ESC prefix
  */
 #define COPY 'w'
 #define REPSEARCH '/'
@@ -127,38 +123,9 @@
 #define STARTBUF '<'
 #define ENDBUF '>'
 #define MATCHBRACE '='
-#define REGEXREG 'x'
-#define UNDOREGEX 'X'
 
-/*
- * Get a character from the input, which is either the terminal (keyboard)
- * or stdin. Only use in main because of the dependency on term_in.
- */
-#ifdef _WIN32
-#define GETCH() (term_in ? _getch() : getchar())
-#else
-#define GETCH() getchar()
-#endif
-
-/* Log file template */
-#define LOGTEMPLATE ".spot_log_XXXXXXXXXX"
-
-/* Templates for files used by sed */
-#define CLTEMPLATE ".c_XXXXXXXXXX"
-#define INTEMPLATE ".i_XXXXXXXXXX"
-#define OUTTEMPLATE ".o_XXXXXXXXXX"
-#define ERRTEMPLATE ".e_XXXXXXXXXX"
-
-#ifdef _WIN32
-#define SEDSTR "sed -C -b -r -f"
-#else
-#define SEDSTR "LC_ALL=C sed -r -f"
-#endif
-
-#define SEDFORMAT "%s %s %s 1> %s 2> %s"
-
-/* Max sed command size including trailing \0 character */
-#define SEDMAXCMD 100
+/* Number of spaces used to display a tab */
+#define TABSIZE 4
 
 /*
  * Default gap size. Must be at least 1.
@@ -176,12 +143,24 @@
  */
 #define EOBCH '~'
 
+/* size_t integer overflow tests */
+#define AOF(a, b) ((a) > SIZE_MAX - (b))
+#define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
+
 /* ASCII test for unsigned input that could be larger than UCHAR_MAX */
 #define ISASCII(u) ((u) <= 127)
 
 /* ANSI escape sequences */
 #define CLEAR_SCREEN() printf("\033[2J")
 #define CLEAR_LINE() printf("\033[2K")
+#define MOVE_CURSOR(y, x) printf("\033[%lu;%luH", (unsigned long) (y), \
+    (unsigned long) (x))
+
+#ifdef _WIN32
+#define GETCH() _getch()
+#else
+#define GETCH() getchar()
+#endif
 
 /* One character operations with no out of bounds checking */
 /* Move left */
@@ -190,34 +169,6 @@
 #define RCH() (*b->g++ = *b->c++)
 /* Delete */
 #define DCH() (b->c++)
-
-/* m4 log an error message */
-#define LOG(m) fprintf(stderr, "%s: %d: %s\n", __FILE__, __LINE__, m)
-
-/*
- * Sets the return value for the text editor (ret) to 1, indicating failure.
- * Logs an error message (without errno) and jumps to the clean up.
- * Only use in main.
- */
-#define QUIT(m) {LOG(m); ret = 1; goto clean_up;}
-
-/*
- * Deletes a file with error logging. Does not set ret to failure.
- * Does not log an error if the file does not exist.
- */
-int rm_if_exists(char *fn)
-{
-    if (fn == NULL)
-        return 1;
-    errno = 0;
-    if (remove(fn) && errno != ENOENT)
-        return 1;
-    return 0;
-}
-
-/* size_t integer overflow tests */
-#define AOF(a, b) ((a) > SIZE_MAX - (b))
-#define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
 
 /*
  * Gap buffer structure.
@@ -245,7 +196,7 @@ struct tb {
 /* Memory structure: used for copy and paste, and search */
 struct mem {
     char *p;                    /* Pointer to memory */
-    size_t u;                   /* Used memory amount (less than or equal to the size) */
+    size_t u;                   /* Used memory amount (<= s) */
     size_t s;                   /* Memory size */
 };
 
@@ -371,8 +322,9 @@ int match_brace(struct buffer *b)
     size_t depth = 1;           /* Depth inside nested braces */
     char orig = *b->c, target, *q;
     int right;                  /* Movement direction */
+    /* Cannot match EOBCH */
     if (b->c == b->e)
-        return 0;               /* Cannot match EOBCH */
+        return 0;
     switch (orig) {
     case '(':
         target = ')';
@@ -407,7 +359,8 @@ int match_brace(struct buffer *b)
         right = 0;
         break;
     default:
-        return 0;               /* Nothing to match */
+        /* Nothing to match */
+        return 0;
     }
     if (right) {
         q = b->c + 1;
@@ -461,12 +414,14 @@ void trim_clean(struct buffer *b)
      * Trims (deletes) trailing whitespace and cleans (deletes all characters
      * that are not ASCII graph, space, tab, or newline.
      */
-    int nl_enc = 0;             /* Trailing newline character has been encountered */
+    int nl_enc = 0;             /* Trailing \n char has been encountered */
     int at_eol = 0;             /* At end of line */
     end_of_buffer(b);
+    /* Empty buffer */
     if (b->g == b->a)
-        return;                 /* Empty buffer */
-    LCH();                      /* Move to the left of the EOBCH, as this cannot be deleted */
+        return;
+    /* Move to the left of the EOBCH */
+    LCH();
     /*
      * Process the end of the file up until the first graph character, that is
      * the trailing characters at the end of the file. This is done backwards
@@ -478,10 +433,11 @@ void trim_clean(struct buffer *b)
             nl_enc = 1;
         else
             DCH();
+        /* Start of buffer */
         if (b->g == b->a)
-            break;              /* Start of buffer */
+            break;
         else
-            LCH();              /* Move left */
+            LCH();
     }
     /*
      * Process the rest of the file, keeping track if the cursor is at the end
@@ -496,10 +452,11 @@ void trim_clean(struct buffer *b)
             DCH();
         else if (*b->c != ' ' && *b->c != '\t')
             DCH();
+        /* Start of buffer */
         if (b->g == b->a)
-            break;              /* Start of buffer */
+            break;
         else
-            LCH();              /* Move left */
+            LCH();
     }
     b->m_set = 0;
 }
@@ -636,6 +593,29 @@ int backspace_char(struct buffer *b, size_t mult)
     return 0;
 }
 
+int insert_hex(struct buffer *b, size_t mult)
+{
+    /* Inserts a two digit hex char from the keyboard */
+    unsigned char hex[2];       /* Hexadecimal array */
+    int key;
+    size_t i;
+    for (i = 0; i < 2; ++i) {
+        key = GETCH();
+        if (ISASCII((unsigned int) key)
+            && isxdigit((unsigned char) key)) {
+            if (isdigit((unsigned char) key))
+                *(hex + i) = key - '0';
+            else if (islower((unsigned char) key))
+                *(hex + i) = 10 + key - 'a';
+            else if (isupper((unsigned char) key))
+                *(hex + i) = 10 + key - 'A';
+        } else {
+            return 1;
+        }
+    }
+    return insert_char(b, *hex * 16 + *(hex + 1), mult);
+}
+
 struct buffer *init_buffer(size_t req)
 {
     /*
@@ -651,8 +631,10 @@ struct buffer *init_buffer(size_t req)
     rg = req + GAP;
     if ((b = malloc(sizeof(struct buffer))) == NULL)
         return NULL;
-    if ((b->a = malloc(rg)) == NULL)
-        goto fail1;
+    if ((b->a = malloc(rg)) == NULL) {
+        free(b);
+        return NULL;
+    }
     b->fn = NULL;
     b->g = b->a;
     *(b->e = b->a + rg - 1) = EOBCH;
@@ -661,9 +643,6 @@ struct buffer *init_buffer(size_t req)
     b->m = 0;
     b->m_set = 0;
     return b;
-  fail1:
-    free(b);
-    return NULL;
 }
 
 void free_buffer(struct buffer *b)
@@ -688,15 +667,14 @@ struct tb *init_tb(size_t req)
     s = n * sizeof(struct buffer *);
     if ((z = malloc(sizeof(struct tb))) == NULL)
         return NULL;
-    if ((z->z = malloc(s)) == NULL)
-        goto fail1;
+    if ((z->z = malloc(s)) == NULL) {
+        free(z);
+        return NULL;
+    }
     z->n = n;
     z->u = 0;
     z->a = 0;
     return z;
-  fail1:
-    free(z);
-    return NULL;
 }
 
 void free_tb(struct tb *z)
@@ -760,72 +738,15 @@ int insert_file(struct buffer *b, char *fn)
         return 1;
     if ((fp = fopen(fn, "rb")) == NULL)
         return 1;
-    if (fread(b->c - fs, 1, fs, fp) != fs)
-        goto fail1;
+    if (fread(b->c - fs, 1, fs, fp) != fs) {
+        fclose(fp);
+        return 1;
+    }
     if (fclose(fp))
         return 1;
     b->c -= fs;
     b->m_set = 0;
     return 0;
-  fail1:
-    if (fclose(fp))
-        return 1;
-    return 1;
-}
-
-int replace_region(struct buffer *b, char *fn)
-{
-    /*
-     * Replaces the region with a file. The file is read into memory before
-     * the old region is deleted, so that the operation is transactional.
-     * The inserted text will be marked as the new region.
-     * grow_gap does not change the mark.
-     */
-    size_t ci = b->g - b->a;    /* Cursor index */
-    size_t reg_s = b->m < ci ? ci - b->m : b->m - ci;   /* Region size */
-    size_t fs;
-    char *t;
-    FILE *fp;
-    if (!b->m_set)
-        return 1;
-    if (get_file_size(fn, &fs))
-        return 1;
-    if (!fs)
-        return 0;
-    /* Get temporary memory */
-
-    if ((t = malloc(fs)) == NULL)
-        return 1;
-    if ((fp = fopen(fn, "rb")) == NULL)
-        goto fail1;
-    if (fread(t, 1, fs, fp) != fs)
-        goto fail2;
-    if (fclose(fp))
-        goto fail1;
-    /* The current region will be recycled */
-    if (fs > reg_s && fs - reg_s > (size_t) (b->c - b->g)
-        && grow_gap(b, fs - reg_s))
-        goto fail1;
-    /* Cursor at end of the region */
-    if (b->m < ci) {
-        backspace_char(b, ci - b->m);   /* Will not be out of bounds */
-        memcpy(b->g, t, fs);    /* Copy memory to left-hand side of gap */
-        b->g += fs;
-    } else {
-        delete_char(b, b->m - ci);      /* Will not be out of bounds */
-        memcpy(b->c - fs, t, fs);       /* Copy memory to right-hand side of gap */
-        b->c -= fs;
-    }
-    /* backspace_char and delete_char unset the mark, so set it again */
-    b->m_set = 1;
-    free(t);
-    return 0;
-  fail2:
-    if (fclose(fp))
-        return 1;
-  fail1:
-    free(t);
-    return 1;
 }
 
 int write_buffer(struct buffer *b, char *fn, int backup_req)
@@ -869,11 +790,15 @@ int write_buffer(struct buffer *b, char *fn, int backup_req)
     if ((fp = fopen(fn, "wb")) == NULL)
         return 1;
     num = (size_t) (b->g - b->a);
-    if (fwrite(b->a, 1, num, fp) != num)
-        goto fail1;
+    if (fwrite(b->a, 1, num, fp) != num) {
+        fclose(fp);
+        return 1;
+    }
     num = (size_t) (b->e - b->c);
-    if (fwrite(b->c, 1, num, fp) != num)
-        goto fail1;
+    if (fwrite(b->c, 1, num, fp) != num) {
+        fclose(fp);
+        return 1;
+    }
     if (fclose(fp))
         return 1;
 #ifndef _WIN32
@@ -881,10 +806,6 @@ int write_buffer(struct buffer *b, char *fn, int backup_req)
         return 1;
 #endif
     return 0;
-  fail1:
-    if (fclose(fp))
-        return 1;
-    return 1;
 }
 
 int rename_buffer(struct buffer *b, char *new_name)
@@ -955,37 +876,6 @@ void set_mark(struct buffer *b)
 {
     b->m = b->g - b->a;
     b->m_set = 1;
-}
-
-int write_region(struct buffer *b, char *fn)
-{
-    /* Writes the region to file */
-    FILE *fp;
-    size_t num;
-    size_t ci = b->g - b->a;    /* Cursor index */
-    if (!b->m_set)
-        return 1;
-    if (b->m == ci)
-        return 0;               /* Empty region, nothing to do */
-    if ((fp = fopen(fn, "wb")) == NULL)
-        return 1;
-    /* Mark before cursor */
-    if (b->m < ci) {
-        num = (size_t) (b->g - b->a) - b->m;
-        if (fwrite(b->a + b->m, 1, num, fp) != num)
-            goto fail1;
-    } else {
-        num = b->m - (size_t) (b->c - b->a);
-        if (fwrite(b->c, 1, num, fp) != num)
-            goto fail1;
-    }
-    if (fclose(fp))
-        return 1;
-    return 0;
-  fail1:
-    if (fclose(fp))
-        return 1;
-    return 1;
 }
 
 int copy_region(struct buffer *b, struct mem *p, int del)
@@ -1060,20 +950,56 @@ int cut_to_sol(struct buffer *b, struct mem *p)
     return copy_region(b, p, 1);
 }
 
-int sys_cmd(char *cmd)
+int new_buffer(struct tb *z, char *fn)
 {
-    /* Executes a system command */
-    int r;
-    if ((r = system(cmd)) == -1)
-        return 1;
-#ifdef _WIN32
-    if (!r)
-        return 0;
-#else
-    if (WIFEXITED(r) && !WEXITSTATUS(r))
-        return 0;
-#endif
-    return 1;
+    struct stat st;
+    size_t new_n, new_s;
+    struct buffer **t;
+    struct buffer *b;           /* Buffer shortcut */
+    /* Grow to take more text buffers */
+    if (z->u == z->n) {
+        if (AOF(z->u, SPARETB))
+            return 1;
+        new_n = z->u + SPARETB;
+        if (MOF(new_n, sizeof(struct buffer *)))
+            return 1;
+        new_s = new_n * sizeof(struct buffer *);
+        if ((t = realloc(z->z, new_s)) == NULL)
+            return 1;
+        z->z = t;
+        z->n = new_n;
+    }
+    b = *(z->z + z->u);         /* Create shortcut */
+    if (fn != NULL && !stat(fn, &st)) {
+        /* File exists */
+        if (!((st.st_mode & S_IFMT) == S_IFREG))
+            return 1;
+        if (st.st_size < 0)
+            return 1;
+        if ((b = init_buffer((size_t) st.st_size)) == NULL)
+            return 1;
+        if (rename_buffer(b, fn)) {
+            free_buffer(b);
+            return 1;
+        }
+        if (insert_file(b, fn)) {
+            free_buffer(b);
+            return 1;
+        }
+    } else {
+        /* New file */
+        if ((b = init_buffer(0)) == NULL)
+            return 1;
+        if (fn != NULL && rename_buffer(b, fn)) {
+            free_buffer(b);
+            return 1;
+        }
+    }
+    /* Success */
+    *(z->z + z->u) = b;         /* Link back */
+    z->a = z->u;                /* Set active text buffer to the new one */
+    ++z->u;                     /* Increase the number of used text buffers */
+    return 0;
 }
 
 #ifdef _WIN32
@@ -1115,28 +1041,6 @@ int get_screen_size(size_t * height, size_t * width)
 #endif
 }
 
-void put_z(size_t a)
-{
-    /* Print a size_t value to stdout */
-    size_t b = a, m = 1;
-    while (b /= 10)
-        m *= 10;
-    do {
-        putchar(a / m + '0');
-        a %= m;
-    } while (m /= 10);
-}
-
-void move_cursor(size_t y, size_t x)
-{
-    /* Move the graphical cursor on the screen */
-    printf("\033[");
-    put_z(y);
-    putchar(';');
-    put_z(x);
-    putchar('H');
-}
-
 void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
 {
     /*
@@ -1151,19 +1055,20 @@ void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
     size_t ta = th * w;         /* Text screen area */
     size_t hth = th > 2 ? th / 2 : 1;   /* Half the text screen height */
     size_t hta = hth * w;       /* Half the text screen area */
-    size_t target_h;            /* The height to stop scanning */
-    size_t height_count = 0;    /* Keeping track of the height while scanning */
+    size_t target_h;            /* Height to stop scanning */
+    size_t height_count = 0;    /* Height while scanning */
     /*
      * Keeping track of the width while scanning.
      * Start from one to count the cursor.
      */
     size_t width_count = 1;
     char *q;                    /* Pointer used for the reverse scan */
-    char *q_stop;               /* Pointer where the reverse scan is to stop (inclusive) */
+    /* Pointer where the reverse scan is to stop (inclusive) */
+    char *q_stop;
     char *q_d = b->a + b->d;    /* Current draw start pointer */
     /*
-     * Pointer to the draw start postion that results in the cursor being centred.
-     * Only used when centreing is not planned.
+     * Pointer to the draw start postion that results in the cursor being
+     * centred. Only used when centreing is not planned.
      */
     char *q_centre = NULL;
 
@@ -1177,13 +1082,6 @@ void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
     }
 
     /*
-     * Test to see if cursor is definitely on screen.
-     * If the user has not requested to centre, then no action is required.
-     */
-    if (ci >= b->d && ci - b->d < th && !centre)
-        return;
-
-    /*
      * Test to see if cursor is definitely off the screen.
      * In this case we must centre.
      */
@@ -1192,7 +1090,7 @@ void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
 
     /*
      * Set the stopping postion to limit the reverse scan as much as possible,
-     * and to reduce the number of checks that must be done each loop iteration.
+     * and reduce the number of checks that must be done each loop iteration.
      */
     if (centre) {
         /*
@@ -1226,15 +1124,20 @@ void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
         }
     }
 
-    q = b->g - 1;               /* Start from the character to the left of the gap */
+    /* Start before the gap */
+    q = b->g - 1;
 
     while (1) {
         /*
          * Process char:
          * Test for full line and test if the target height has been reached.
          */
-        if (*q == '\n' || ++width_count > w) {
-            width_count = 0;
+        if (*q == '\n'
+            || (*q == '\t' ? width_count += TABSIZE : ++width_count) > w) {
+            if (*q == '\n')
+                width_count = 0;
+            else
+                width_count -= (w + 1); /* Tabs can wrap */
             ++height_count;
             /* Record draw start position for centreing */
             if (height_count == hth) {
@@ -1276,6 +1179,7 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
     size_t len;                 /* Used for printing the filename */
     /* Height of text buffer portion of the screen */
     size_t th = h > 2 ? h - 2 : 1;
+    size_t i;                   /* Index for printing tabs */
 
     /* Text buffer */
     reverse_scan(b, th, w, centre);
@@ -1295,6 +1199,9 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
             do {
                 *(ns + v++) = ' ';
             } while (v % w);
+        else if (ch == '\t')
+            for (i = 0; i < TABSIZE; ++i)
+                *(ns + v++) = ' ';
         else
             *(ns + v++) = isgraph((unsigned char) ch)
                 || ch == ' ' ? ch : '?';
@@ -1310,6 +1217,9 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
             do {
                 *(ns + v++) = ' ';
             } while (v % w);
+        else if (ch == '\t')
+            for (i = 0; i < TABSIZE; ++i)
+                *(ns + v++) = ' ';
         else
             *(ns + v++) = isgraph((unsigned char) ch)
                 || ch == ' ' ? ch : '?';
@@ -1373,6 +1283,9 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
             do {
                 *(ns + v++) = ' ';
             } while (v % w);
+        else if (ch == '\t')
+            for (i = 0; i < TABSIZE; ++i)
+                *(ns + v++) = ' ';
         else
             *(ns + v++) = isgraph((unsigned char) ch)
                 || ch == ' ' ? ch : '?';
@@ -1390,6 +1303,9 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
             do {
                 *(ns + v++) = ' ';
             } while (v % w);
+        else if (ch == '\t')
+            for (i = 0; i < TABSIZE; ++i)
+                *(ns + v++) = ' ';
         else
             *(ns + v++) = isgraph((unsigned char) ch)
                 || ch == ' ' ? ch : '?';
@@ -1409,13 +1325,13 @@ void diff_draw(char *ns, char *cs, size_t sa, size_t w)
 {
     /* Physically draw the screen where the virtual screens differ */
     size_t v;                   /* Index */
-    int in_pos = 0;             /* If in position for printing (no move is required) */
+    int in_pos = 0;             /* In position for printing */
     char ch;
     for (v = 0; v < sa; ++v) {
         if ((ch = *(ns + v)) != *(cs + v)) {
             if (!in_pos) {
                 /* Top left corner is (1, 1) not (0, 0) so need to add one */
-                move_cursor(v / w + 1, v - (v / w) * w + 1);
+                MOVE_CURSOR(v / w + 1, v - (v / w) * w + 1);
                 in_pos = 1;
             }
             putchar(ch);
@@ -1423,93 +1339,6 @@ void diff_draw(char *ns, char *cs, size_t sa, size_t w)
             in_pos = 0;
         }
     }
-}
-
-int new_buffer(struct tb *z, char *fn)
-{
-    struct stat st;
-    size_t new_n, new_s;
-    struct buffer **t;
-    struct buffer *b;           /* Buffer shortcut */
-    /* Grow to take more text buffers */
-    if (z->u == z->n) {
-        if (AOF(z->u, SPARETB))
-            return 1;
-        new_n = z->u + SPARETB;
-        if (MOF(new_n, sizeof(struct buffer *)))
-            return 1;
-        new_s = new_n * sizeof(struct buffer *);
-        if ((t = realloc(z->z, new_s)) == NULL)
-            return 1;
-        z->z = t;
-        z->n = new_n;
-    }
-    b = *(z->z + z->u);         /* Create shortcut */
-    if (fn != NULL && !stat(fn, &st)) {
-        /* File exists */
-        if (!((st.st_mode & S_IFMT) == S_IFREG))
-            return 1;
-        if (st.st_size < 0)
-            return 1;
-        if ((b = init_buffer((size_t) st.st_size)) == NULL)
-            return 1;
-        if (rename_buffer(b, fn)) {
-            free_buffer(b);
-            return 1;
-        }
-        if (insert_file(b, fn)) {
-            free_buffer(b);
-            return 1;
-        }
-    } else {
-        /* New file */
-        if ((b = init_buffer(0)) == NULL)
-            return 1;
-        if (fn != NULL && rename_buffer(b, fn)) {
-            free_buffer(b);
-            return 1;
-        }
-    }
-    /* Success */
-    *(z->z + z->u) = b;         /* Link back */
-    z->a = z->u;                /* Make the active text buffer the new text buffer */
-    ++z->u;                     /* Increase the number of used text buffers */
-    return 0;
-}
-
-char *make_temp_file(char *template)
-{
-    char *t;
-    size_t len = strlen(template), s;
-#ifdef _WIN32
-    HANDLE fh;
-#else
-    int fd;
-#endif
-    if (AOF(len, 1))
-        return NULL;
-    s = len + 1;
-    if ((t = malloc(s)) == NULL)
-        return NULL;
-    memcpy(t, template, len);
-    *(t + len) = '\0';
-
-#ifdef _WIN32
-    if (_mktemp_s(t, len + 1))
-        return NULL;
-    if ((fh = CreateFile(t, GENERIC_WRITE, 0, NULL, CREATE_NEW,
-                         FILE_ATTRIBUTE_NORMAL,
-                         NULL)) == INVALID_HANDLE_VALUE)
-        return NULL;
-    if (!CloseHandle(fh))
-        return NULL;
-#else
-    if ((fd = mkstemp(t)) == -1)
-        return NULL;
-    if (close(fd))
-        return NULL;
-#endif
-    return t;
 }
 
 int main(int argc, char **argv)
@@ -1540,89 +1369,73 @@ int main(int argc, char **argv)
     /* Keyboard key (one physical key can send multiple) */
     int key;
     int digit;                  /* Numerical digit */
-    unsigned char hex[2];       /* Hexadecimal array */
-    int term_in = 0;            /* Terminal input */
     size_t mult;                /* Command multiplier (cannot be zero) */
-    char *clfn = NULL;          /* Command line filename used as sed script */
-    char *infn = NULL;          /* Sed input filename */
-    char *outfn = NULL;         /* Sed output filename */
-    char *errfn = NULL;         /* Sed error filename */
-    char sedcmd[SEDMAXCMD];     /* Sed command */
-    int regex_ok = 0;           /* Last regex completed successfully */
     char *t;                    /* Temporary pointer */
     size_t i;                   /* Generic index */
 #ifndef _WIN32
     struct termios term_orig, term_new;
 #endif
 
-
-    /* Create files for sed */
-    if ((clfn = make_temp_file(CLTEMPLATE)) == NULL)
-        QUIT("failed to make command line file for sed script");
-    if ((infn = make_temp_file(INTEMPLATE)) == NULL)
-        QUIT("failed to make sed input file");
-    if ((outfn = make_temp_file(OUTTEMPLATE)) == NULL)
-        QUIT("failed to make sed output file");
-    if ((errfn = make_temp_file(ERRTEMPLATE)) == NULL)
-        QUIT("failed to make sed error file");
-
-    /* Create sed command */
-    snprintf(sedcmd, SEDMAXCMD, SEDFORMAT, SEDSTR, clfn, infn, outfn,
-             errfn);
-
-    /* Ignore interrupt, sent by ^C */
-/*    if (signal(SIGINT, SIG_IGN) == SIG_ERR) QUIT("cannot ignore SIGINT"); */
-
-    /* See if input is from a terminal */
+    /* Check input is from a terminal */
 #ifdef _WIN32
-    if (_isatty(_fileno(stdin)))
-        term_in = 1;
+    if (!_isatty(_fileno(stdin)))
+        return 1;
 #else
-    if (isatty(STDIN_FILENO))
-        term_in = 1;
+    if (!isatty(STDIN_FILENO))
+        return 1;
 #endif
 
 #ifndef _WIN32
-    if (term_in) {
-        /* Change terminal input to raw and no echo */
-        if (tcgetattr(STDIN_FILENO, &term_orig))
-            QUIT("cannot get terminal attributes");
-
-        term_new = term_orig;
-        cfmakeraw(&term_new);
-
-        if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new))
-            QUIT("cannot set terminal attributes");
-    }
+    /* Change terminal input to raw and no echo */
+    if (tcgetattr(STDIN_FILENO, &term_orig))
+        return 1;
+    term_new = term_orig;
+    cfmakeraw(&term_new);
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new))
+        return 1;
 #endif
 
     /* Process command line arguments */
     if (argc > 1) {
-        if ((z = init_tb(argc - 1)) == NULL)
-            QUIT("failed to init text buffers");
+        if ((z = init_tb(argc - 1)) == NULL) {
+            ret = 1;
+            goto clean_up;
+        }
         /* Load files into buffers */
         for (i = 0; i < (size_t) (argc - 1); ++i)
-            if (new_buffer(z, *(argv + i + 1)))
-                QUIT("failed to create new buffer");
-        z->a = 0;               /* Go back to first buffer */
+            if (new_buffer(z, *(argv + i + 1))) {
+                ret = 1;
+                goto clean_up;
+            }
+        /* Go back to first buffer */
+        z->a = 0;
     } else {
-        if ((z = init_tb(1)) == NULL)
-            QUIT("failed to init text buffers");
+        if ((z = init_tb(1)) == NULL) {
+            ret = 1;
+            goto clean_up;
+        }
         /* Start empty buffer */
-        if (new_buffer(z, NULL))
-            QUIT("failed to create new buffer");
+        if (new_buffer(z, NULL)) {
+            ret = 1;
+            goto clean_up;
+        }
     }
 
     /* Initialise command line buffer */
-    if ((cl = init_buffer(0)) == NULL)
-        QUIT("failed to init command line buffer");
+    if ((cl = init_buffer(0)) == NULL) {
+        ret = 1;
+        goto clean_up;
+    }
     /* Initialise search memory */
-    if ((se = init_mem()) == NULL)
-        QUIT("failed to init search memory");
+    if ((se = init_mem()) == NULL) {
+        ret = 1;
+        goto clean_up;
+    }
     /* Initialise paste memory */
-    if ((p = init_mem()) == NULL)
-        QUIT("failed to init paste memory");
-
+    if ((p = init_mem()) == NULL) {
+        ret = 1;
+        goto clean_up;
+    }
 #ifdef _WIN32
     setup_graphics();
 #endif
@@ -1632,8 +1445,10 @@ int main(int argc, char **argv)
 
         /* Top of the editor loop */
       top:
-        if (get_screen_size(&new_h, &new_w))
-            QUIT("failed to get screen size");
+        if (get_screen_size(&new_h, &new_w)) {
+            ret = 1;
+            goto clean_up;
+        }
 
         /* Do graphics only if screen is big enough */
         if (new_h >= 1 && new_w >= 1) {
@@ -1641,18 +1456,24 @@ int main(int argc, char **argv)
             if (redraw || new_h != h || new_w != w) {
                 h = new_h;
                 w = new_w;
-                if (h > INT_MAX / w)
-                    QUIT("integer overflow");
+                if (h > INT_MAX / w) {
+                    ret = 1;
+                    goto clean_up;
+                }
                 sa = h * w;
                 /* Bigger screen */
                 if (ss < sa) {
                     free(ns);
                     free(cs);
-                    if ((t = malloc(sa)) == NULL)
-                        QUIT("malloc failed");
+                    if ((t = malloc(sa)) == NULL) {
+                        ret = 1;
+                        goto clean_up;
+                    }
                     ns = t;
-                    if ((t = malloc(sa)) == NULL)
-                        QUIT("malloc failed");
+                    if ((t = malloc(sa)) == NULL) {
+                        ret = 1;
+                        goto clean_up;
+                    }
                     cs = t;
                     ss = sa;
                 }
@@ -1667,22 +1488,25 @@ int main(int argc, char **argv)
 
             draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx,
                         centre);
-            centre = 0;         /* Clear centre request */
+            /* Clear centre request */
+            centre = 0;
             diff_draw(ns, cs, sa, w);
             /* Top left corner is (1, 1) not (0, 0) so need to add one */
-            move_cursor(cy + 1, cx + 1);
+            MOVE_CURSOR(cy + 1, cx + 1);
             /* Swap virtual screens */
             t = cs;
             cs = ns;
             ns = t;
         }
 
-        cr = 0;                 /* Reset command return value */
+        /* Reset command return value */
+        cr = 0;
 
         /* Shortcut to the cursor's buffer */
         cb = cla ? cl : *(z->z + z->a);
 
-        mult = 1;               /* Reset command multiplier */
+        /* Reset command multiplier */
+        mult = 1;
         if ((key = GETCH()) == CMDMULT) {
             /* Read multiplier number */
             mult = 0;
@@ -1753,15 +1577,6 @@ int main(int argc, char **argv)
                 goto top;
             case REDRAW:
                 redraw = 1;
-                goto top;
-            case REGEXREG:
-                delete_buffer(cl);
-                cla = 1;
-                operation = 'X';
-                goto top;
-            case UNDOREGEX:
-                if (regex_ok)
-                    cr = replace_region(cb, infn);
                 goto top;
 #ifndef _WIN32
             case '[':
@@ -1865,26 +1680,11 @@ int main(int argc, char **argv)
             }
             goto top;
         case INSERTHEX:
-            for (i = 0; i < 2; ++i) {
-                key = GETCH();
-                if (ISASCII((unsigned int) key)
-                    && isxdigit((unsigned char) key)) {
-                    if (isdigit((unsigned char) key))
-                        *(hex + i) = key - '0';
-                    else if (islower((unsigned char) key))
-                        *(hex + i) = 10 + key - 'a';
-                    else if (isupper((unsigned char) key))
-                        *(hex + i) = 10 + key - 'A';
-                } else {
-                    cr = 1;
-                    goto top;
-                }
-            }
-            cr = insert_char(cb, *hex * 16 + *(hex + 1), mult);
+            cr = insert_hex(cb, mult);
             goto top;
         }
 
-        if (key == Cx) {
+        if (key == C('x')) {
             key = GETCH();
             switch (key) {
             case CLOSE:
@@ -1974,23 +1774,6 @@ int main(int argc, char **argv)
                 }
                 cr = new_buffer(z, cl_str);
                 goto top;
-            case 'X':
-                regex_ok = 0;   /* Clear as may fail */
-                if (write_buffer(cl, clfn, 0)) {
-                    cr = 1;
-                    goto top;
-                }
-                if (write_region(*(z->z + z->a), infn)) {
-                    cr = 1;
-                    goto top;
-                }
-                if (sys_cmd(sedcmd)) {
-                    cr = 1;
-                    goto top;
-                }
-                if (!(cr = replace_region(*(z->z + z->a), outfn)))
-                    regex_ok = 1;
-                goto top;
             }
         }
 
@@ -2003,17 +1786,9 @@ int main(int argc, char **argv)
   clean_up:
     CLEAR_SCREEN();
 #ifndef _WIN32
-    if (term_in && tcsetattr(STDIN_FILENO, TCSANOW, &term_orig))
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_orig))
         ret = 1;
 #endif
-    /*
-     * Remove files for sed, without setting ret on failure.
-     * No logging is performed if file does not exist.
-     */
-    rm_if_exists(clfn);
-    rm_if_exists(infn);
-    rm_if_exists(outfn);
-    rm_if_exists(errfn);
     /* Free memory */
     free_buffer(cl);
     free_tb(z);
@@ -2022,9 +1797,5 @@ int main(int argc, char **argv)
     free(cl_str);
     free(ns);
     free(cs);
-    free(clfn);
-    free(infn);
-    free(outfn);
-    free(errfn);
     return ret;
 }
