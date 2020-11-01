@@ -90,7 +90,9 @@
 #define CUT C('w')
 /* Yank */
 #define PASTE C('y')
-/* Kill. Uproot when command multiplier is zero */
+/* Reverse kill */
+#define CUTTOSOL C('r')
+/* Kill */
 #define CUTTOEOL C('k')
 #define SEARCH C('s')
 /* Level cursor on screen */
@@ -169,6 +171,29 @@
 #define RCH() (*b->g++ = *b->c++)
 /* Delete */
 #define DCH() (b->c++)
+
+#define VPUTCH(ch) do { \
+    uch = (unsigned char) ch; \
+    if (isgraph(uch) || uch == ' ') { \
+        *(ns + v++) = uch; \
+    } else if (uch == '\n') { \
+        do { \
+            *(ns + v++) = ' '; \
+        } while (v % w); \
+    } else if (uch == '\t') { \
+        for (i = 0; i < TABSIZE; ++i) \
+            *(ns + v++) = ' '; \
+    } else if (uch >= 1 && uch <= 26) { \
+        *(ns + v++) = '^'; \
+        *(ns + v++) = 'A' + uch - 1; \
+    } else if (!uch) { \
+        *(ns + v++) = '\\'; \
+        *(ns + v++) = '0'; \
+    } else { \
+        *(ns + v++) = uch / 16 >= 10 ? uch / 16 - 10 + 'A' : uch / 16 + '0'; \
+        *(ns + v++) = uch % 16 >= 10 ? uch % 16 - 10 + 'A' : uch % 16 + '0'; \
+    } \
+} while (0)
 
 /*
  * Gap buffer structure.
@@ -274,10 +299,7 @@ int up_line(struct buffer *b, size_t mult)
     char *q;
     orig_coli = col_index(b);   /* Get the original column index */
     q = b->g - orig_coli;       /* Jump to start of the line */
-    /*
-     * Move up mult lines, will stop at the end of the line.
-     * Please note that mult is not allowed to be zero.
-     */
+    /* Move up mult lines, will stop at the end of the line */
     while (mult && q != b->a)
         if (*--q == '\n')
             --mult;
@@ -301,7 +323,8 @@ int down_line(struct buffer *b, size_t mult)
 {
     /* Moves the cursor down mult lines */
     size_t coli = col_index(b); /* Get the existing column index */
-    char *q = b->c;
+    char *q;
+    q = b->c;
     /* Move down mult lines */
     while (mult && q != b->e)
         if (*q++ == '\n')
@@ -1041,129 +1064,21 @@ int get_screen_size(size_t * height, size_t * width)
 #endif
 }
 
-void reverse_scan(struct buffer *b, size_t th, size_t w, int centre)
+void centre_cursor(struct buffer *b, size_t num_up, size_t limit)
 {
-    /*
-     * This is the most complicated function in the text editor.
-     * It does a reverse scan to see if the cursor would be on the screen.
-     * If the cursor would be off the screen, or if the user requested to
-     * centre, then draw start will be set so that the cursor will end up
-     * on the middle line.
-     */
-
-    size_t ci = b->g - b->a;    /* Cursor index */
-    size_t ta = th * w;         /* Text screen area */
-    size_t hth = th > 2 ? th / 2 : 1;   /* Half the text screen height */
-    size_t hta = hth * w;       /* Half the text screen area */
-    size_t target_h;            /* Height to stop scanning */
-    size_t height_count = 0;    /* Height while scanning */
-    /*
-     * Keeping track of the width while scanning.
-     * Start from one to count the cursor.
-     */
-    size_t width_count = 1;
-    char *q;                    /* Pointer used for the reverse scan */
-    /* Pointer where the reverse scan is to stop (inclusive) */
-    char *q_stop;
-    char *q_d = b->a + b->d;    /* Current draw start pointer */
-    /*
-     * Pointer to the draw start postion that results in the cursor being
-     * centred. Only used when centreing is not planned.
-     */
-    char *q_centre = NULL;
-
-    /*
-     * If the cursor is at the start of the buffer, then must
-     * draw start from the start of the buffer.
-     */
-    if (b->g == b->a) {
-        b->d = 0;
+    char *q;
+    q = b->g;
+    while (num_up && limit && q != b->a) {
+        --limit;
+        if (*--q == '\n')
+            --num_up;
+    }
+    if (num_up) {
+        b->d = b->g - b->a;     /* Failed, so draw from cursor */
         return;
     }
-
-    /*
-     * Test to see if cursor is definitely off the screen.
-     * In this case we must centre.
-     */
-    if (ci < b->d || ci - b->d >= ta)
-        centre = 1;
-
-    /*
-     * Set the stopping postion to limit the reverse scan as much as possible,
-     * and reduce the number of checks that must be done each loop iteration.
-     */
-    if (centre) {
-        /*
-         * Make sure we don't over shoot the start of the buffer.
-         * Minus one to account for the cursor.
-         */
-        if (ci < hta - 1)
-            q_stop = b->a;
-        else
-            q_stop = b->g - (hta - 1);
-        target_h = hth;
-    } else {
-        if (ci < ta - 1)
-            q_stop = b->a;
-        else
-            q_stop = b->g - (ta - 1);
-        /* Don't go past current draw start */
-        if (q_stop < q_d)
-            q_stop = q_d;
-        target_h = th;
-    }
-
-    /* Process cursor if the screen is one wide */
-    if (w == 1) {
-        width_count = 0;
-        ++height_count;
-        /* If the text area is one by one, then draw from the cursor */
-        if (target_h == 1) {
-            b->d = ci;
-            return;
-        }
-    }
-
-    /* Start before the gap */
-    q = b->g - 1;
-
-    while (1) {
-        /*
-         * Process char:
-         * Test for full line and test if the target height has been reached.
-         */
-        if (*q == '\n'
-            || (*q == '\t' ? width_count += TABSIZE : ++width_count) > w) {
-            if (*q == '\n')
-                width_count = 0;
-            else
-                width_count -= (w + 1); /* Tabs can wrap */
-            ++height_count;
-            /* Record draw start position for centreing */
-            if (height_count == hth) {
-                q_centre = q;
-                /* Increase if stopped on a new line character */
-                if (*q_centre == '\n')
-                    ++q_centre;
-            }
-            /*
-             * Stop when target height has been reached.
-             * This is to prevent unnecessary scanning.
-             * In this sitution q_centre will be used.
-             */
-            if (height_count == target_h) {
-                q = q_centre;
-                break;
-            }
-        }
-
-        /* To avoid decrementing to in front of memory allocation */
-        if (q == q_stop)
-            break;
+    while (q != b->a && *(q - 1) != '\n')
         --q;
-    }
-
-    /* Set draw start */
     b->d = q - b->a;
 }
 
@@ -1172,57 +1087,63 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
                  int centre)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
-    char *q, ch;
-    unsigned char u, w_part, r_part;    /* For hex calculation */
+    char *q;
+    unsigned char uch;
     size_t v;                   /* Virtual screen index */
-    size_t j;                   /* Filename character index */
-    size_t len;                 /* Used for printing the filename */
     /* Height of text buffer portion of the screen */
     size_t th = h > 2 ? h - 2 : 1;
+    size_t ci = b->g - b->a;    /* Cursor index */
+    size_t ta = th * w;         /* Text screen area */
+    size_t hth = th > 2 ? th / 2 : 1;   /* Half the text screen height */
+    size_t hta = hth * w;       /* Half the text screen area */
+    size_t j;                   /* Filename character index */
+    size_t len;                 /* Used for printing the filename */
     size_t i;                   /* Index for printing tabs */
 
     /* Text buffer */
-    reverse_scan(b, th, w, centre);
+
+    /*
+     * Test to see if cursor is definitely off the screen.
+     * In this case we must centre.
+     */
+    if (ci < b->d || ci - b->d >= ta)
+        centre = 1;
+
+  text_draw:
+    if (centre)
+        centre_cursor(b, hth, hta);
 
     v = 0;
     q = b->a + b->d;
     /* Print before the gap */
-    while (q != b->g) {
-        ch = *q++;
+    while (q != b->g && v / w != th) {
         /*
          * When a newline character is encountered, complete the screen
          * line with spaces. The modulus will be zero at the start of
          * the next screen line. The "do" makes it work when the '\n'
          * is the first character on a screen line.
          */
-        if (ch == '\n')
-            do {
-                *(ns + v++) = ' ';
-            } while (v % w);
-        else if (ch == '\t')
-            for (i = 0; i < TABSIZE; ++i)
-                *(ns + v++) = ' ';
-        else
-            *(ns + v++) = isgraph((unsigned char) ch)
-                || ch == ' ' ? ch : '?';
+        VPUTCH(*q++);
     }
+
+    if (q != b->g) {
+        /* Cursor is outside of text portion of screen */
+        if (!centre)
+            centre = 1;
+        else {
+            centre = 0;
+            b->d = b->g - b->a; /* Draw from cursor */
+        }
+        goto text_draw;
+    }
+
     /* Record cursor's screen location */
     *cy = v / w;
     *cx = v % w;
     q = b->c;
     /* Print after the gap */
     do {
-        ch = *q;
-        if (ch == '\n')
-            do {
-                *(ns + v++) = ' ';
-            } while (v % w);
-        else if (ch == '\t')
-            for (i = 0; i < TABSIZE; ++i)
-                *(ns + v++) = ' ';
-        else
-            *(ns + v++) = isgraph((unsigned char) ch)
-                || ch == ' ' ? ch : '?';
+        VPUTCH(*q);
         /* Stop if have reached the status bar, before printing there */
         if (v / w == th)
             break;
@@ -1242,22 +1163,13 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
      */
     *(ns + v++) = cr ? '!' : ' ';
 
-    /* Print hex of char under the cursor */
-    if (w >= 3) {
-        u = cla ? (unsigned char) *cl->c : (unsigned char) *b->c;
-        w_part = u / 16;        /* Whole part */
-        r_part = u % 16;        /* Remainder part */
-        *(ns + v++) = w_part >= 10 ? w_part - 10 + 'A' : w_part + '0';
-        *(ns + v++) = r_part >= 10 ? r_part - 10 + 'A' : r_part + '0';
-    }
-
     /* Blank space */
-    if (w >= 4) {
+    if (w >= 2) {
         *(ns + v++) = ' ';
     }
 
     /* Print filename */
-    if (w > 4 && b->fn != NULL) {
+    if (w > 2 && b->fn != NULL) {
         len = strlen(b->fn);
         /* Truncate filename if screen is not wide enough */
         len = len < w - 4 ? len : w - 4;
@@ -1274,22 +1186,17 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
         return;
 
     /* Command line buffer */
-    reverse_scan(cl, 1, w, 0);
+/*
+cl_draw:
+    centre_cursor(cl, 0, w);
+*/
     q = cl->a + cl->d;
     /* Print before the gap */
     while (q != cl->g) {
-        ch = *q++;
-        if (ch == '\n')
-            do {
-                *(ns + v++) = ' ';
-            } while (v % w);
-        else if (ch == '\t')
-            for (i = 0; i < TABSIZE; ++i)
-                *(ns + v++) = ' ';
-        else
-            *(ns + v++) = isgraph((unsigned char) ch)
-                || ch == ' ' ? ch : '?';
+        VPUTCH(*q++);
     }
+
+
     /* If the command line is active, record cursor's screen location */
     if (cla) {
         *cy = v / w;
@@ -1298,17 +1205,7 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
     q = cl->c;
     /* Print after the gap */
     while (1) {
-        ch = *q;
-        if (ch == '\n')
-            do {
-                *(ns + v++) = ' ';
-            } while (v % w);
-        else if (ch == '\t')
-            for (i = 0; i < TABSIZE; ++i)
-                *(ns + v++) = ' ';
-        else
-            *(ns + v++) = isgraph((unsigned char) ch)
-                || ch == ' ' ? ch : '?';
+        VPUTCH(*q);
         /* Stop if off the bottom of the screen, before printing there */
         if (v / w == h)
             break;
@@ -1526,6 +1423,9 @@ int main(int argc, char **argv)
                 key = GETCH();
             }
         }
+        /* mult cannot be zero */
+        if (!mult)
+            mult = 1;
 
         /* Remap special keyboard keys */
 #ifdef _WIN32
@@ -1663,11 +1563,11 @@ int main(int argc, char **argv)
             cla = 1;
             operation = 'S';
             goto top;
+        case CUTTOSOL:
+            cr = cut_to_sol(cb, p);
+            goto top;
         case CUTTOEOL:
-            if (!mult)
-                cr = cut_to_sol(cb, p);
-            else
-                cr = cut_to_eol(cb, p);
+            cr = cut_to_eol(cb, p);
             goto top;
         case CMDEXIT:
             if (cb->m_set) {
