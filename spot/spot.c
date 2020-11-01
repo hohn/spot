@@ -126,9 +126,6 @@
 #define ENDBUF '>'
 #define MATCHBRACE '='
 
-/* Number of spaces used to display a tab */
-#define TABSIZE 4
-
 /*
  * Default gap size. Must be at least 1.
  * It is good to set small while testing, say 2, but BUFSIZ is a sensible
@@ -152,18 +149,6 @@
 /* ASCII test for unsigned input that could be larger than UCHAR_MAX */
 #define ISASCII(u) ((u) <= 127)
 
-/* ANSI escape sequences */
-#define CLEAR_SCREEN() printf("\033[2J")
-#define CLEAR_LINE() printf("\033[2K")
-#define MOVE_CURSOR(y, x) printf("\033[%lu;%luH", (unsigned long) (y), \
-    (unsigned long) (x))
-
-#ifdef _WIN32
-#define GETCH() _getch()
-#else
-#define GETCH() getchar()
-#endif
-
 /* One character operations with no out of bounds checking */
 /* Move left */
 #define LCH() (*--b->c = *--b->g)
@@ -171,29 +156,6 @@
 #define RCH() (*b->g++ = *b->c++)
 /* Delete */
 #define DCH() (b->c++)
-
-#define VPUTCH(ch) do { \
-    uch = (unsigned char) ch; \
-    if (isgraph(uch) || uch == ' ') { \
-        *(ns + v++) = uch; \
-    } else if (uch == '\n') { \
-        do { \
-            *(ns + v++) = ' '; \
-        } while (v % w); \
-    } else if (uch == '\t') { \
-        for (i = 0; i < TABSIZE; ++i) \
-            *(ns + v++) = ' '; \
-    } else if (uch >= 1 && uch <= 26) { \
-        *(ns + v++) = '^'; \
-        *(ns + v++) = 'A' + uch - 1; \
-    } else if (!uch) { \
-        *(ns + v++) = '\\'; \
-        *(ns + v++) = '0'; \
-    } else { \
-        *(ns + v++) = uch / 16 >= 10 ? uch / 16 - 10 + 'A' : uch / 16 + '0'; \
-        *(ns + v++) = uch % 16 >= 10 ? uch % 16 - 10 + 'A' : uch % 16 + '0'; \
-    } \
-} while (0)
 
 /*
  * Gap buffer structure.
@@ -1025,45 +987,6 @@ int new_buffer(struct tb *z, char *fn)
     return 0;
 }
 
-#ifdef _WIN32
-int setup_graphics(void)
-{
-    /* Turn on interpretation of VT100-like escape sequences */
-    HANDLE out;
-    DWORD mode;
-    if ((out = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE)
-        return 1;
-    if (!GetConsoleMode(out, &mode))
-        return 1;
-    if (!SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
-        return 1;
-    return 0;
-}
-#endif
-
-int get_screen_size(size_t * height, size_t * width)
-{
-    /* Gets the screen size */
-#ifdef _WIN32
-    HANDLE out;
-    CONSOLE_SCREEN_BUFFER_INFO info;
-    if ((out = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE)
-        return 1;
-    if (!GetConsoleScreenBufferInfo(out, &info))
-        return 1;
-    *height = info.srWindow.Bottom - info.srWindow.Top + 1;
-    *width = info.srWindow.Right - info.srWindow.Left + 1;
-    return 0;
-#else
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1)
-        return 1;
-    *height = ws.ws_row;
-    *width = ws.ws_col;
-    return 0;
-#endif
-}
-
 void centre_cursor(struct buffer *b, size_t num_up, size_t limit)
 {
     char *q;
@@ -1218,32 +1141,10 @@ cl_draw:
         *(ns + v++) = ' ';
 }
 
-void diff_draw(char *ns, char *cs, size_t sa, size_t w)
-{
-    /* Physically draw the screen where the virtual screens differ */
-    size_t v;                   /* Index */
-    int in_pos = 0;             /* In position for printing */
-    char ch;
-    for (v = 0; v < sa; ++v) {
-        if ((ch = *(ns + v)) != *(cs + v)) {
-            if (!in_pos) {
-                /* Top left corner is (1, 1) not (0, 0) so need to add one */
-                MOVE_CURSOR(v / w + 1, v - (v / w) * w + 1);
-                in_pos = 1;
-            }
-            putchar(ch);
-        } else {
-            in_pos = 0;
-        }
-    }
-}
-
 int main(int argc, char **argv)
 {
     int ret = 0;                /* Editor's return value */
     int running = 1;            /* Editor is running */
-    size_t h = 0, w = 0;        /* Screen height and width (real) */
-    size_t new_h, new_w;        /* New screen height and width (real) */
     size_t cy, cx;              /* Cursor's screen coordinates */
     struct tb *z = NULL;        /* The text buffers */
     struct buffer *cl = NULL;   /* Command line buffer */
@@ -1259,38 +1160,12 @@ int main(int argc, char **argv)
     int centre = 0;             /* Request to centre the cursor */
     int redraw = 0;             /* Request to redraw the entire screen */
     struct buffer *cb;          /* Shortcut to the cursor's buffer */
-    char *ns = NULL;            /* Next screen (virtual) */
-    char *cs = NULL;            /* Current screen (virtual) */
-    size_t ss = 0;              /* Screen size (virtual) */
-    size_t sa = 0;              /* Terminal screen area (real) */
     /* Keyboard key (one physical key can send multiple) */
     int key;
     int digit;                  /* Numerical digit */
     size_t mult;                /* Command multiplier (cannot be zero) */
     char *t;                    /* Temporary pointer */
     size_t i;                   /* Generic index */
-#ifndef _WIN32
-    struct termios term_orig, term_new;
-#endif
-
-    /* Check input is from a terminal */
-#ifdef _WIN32
-    if (!_isatty(_fileno(stdin)))
-        return 1;
-#else
-    if (!isatty(STDIN_FILENO))
-        return 1;
-#endif
-
-#ifndef _WIN32
-    /* Change terminal input to raw and no echo */
-    if (tcgetattr(STDIN_FILENO, &term_orig))
-        return 1;
-    term_new = term_orig;
-    cfmakeraw(&term_new);
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_new))
-        return 1;
-#endif
 
     /* Process command line arguments */
     if (argc > 1) {
@@ -1333,68 +1208,12 @@ int main(int argc, char **argv)
         ret = 1;
         goto clean_up;
     }
-#ifdef _WIN32
-    setup_graphics();
-#endif
 
     /* Editor loop */
     while (running) {
 
         /* Top of the editor loop */
       top:
-        if (get_screen_size(&new_h, &new_w)) {
-            ret = 1;
-            goto clean_up;
-        }
-
-        /* Do graphics only if screen is big enough */
-        if (new_h >= 1 && new_w >= 1) {
-            /* Requested redraw or change in screen dimensions */
-            if (redraw || new_h != h || new_w != w) {
-                h = new_h;
-                w = new_w;
-                if (h > INT_MAX / w) {
-                    ret = 1;
-                    goto clean_up;
-                }
-                sa = h * w;
-                /* Bigger screen */
-                if (ss < sa) {
-                    free(ns);
-                    free(cs);
-                    if ((t = malloc(sa)) == NULL) {
-                        ret = 1;
-                        goto clean_up;
-                    }
-                    ns = t;
-                    if ((t = malloc(sa)) == NULL) {
-                        ret = 1;
-                        goto clean_up;
-                    }
-                    cs = t;
-                    ss = sa;
-                }
-                /*
-                 * Clear the virtual current screen and the physical screen.
-                 * There is no need to clear the virtual next screen, as it
-                 * clears during printing.
-                 */
-                memset(cs, ' ', ss);
-                CLEAR_SCREEN();
-            }
-
-            draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx,
-                        centre);
-            /* Clear centre request */
-            centre = 0;
-            diff_draw(ns, cs, sa, w);
-            /* Top left corner is (1, 1) not (0, 0) so need to add one */
-            MOVE_CURSOR(cy + 1, cx + 1);
-            /* Swap virtual screens */
-            t = cs;
-            cs = ns;
-            ns = t;
-        }
 
         /* Reset command return value */
         cr = 0;
@@ -1684,18 +1503,11 @@ int main(int argc, char **argv)
     }
 
   clean_up:
-    CLEAR_SCREEN();
-#ifndef _WIN32
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &term_orig))
-        ret = 1;
-#endif
     /* Free memory */
     free_buffer(cl);
     free_tb(z);
     free_mem(se);
     free_mem(p);
     free(cl_str);
-    free(ns);
-    free(cs);
     return ret;
 }
