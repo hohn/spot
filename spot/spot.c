@@ -63,6 +63,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "lcurses.h"
+
 /* Convert lowercase letter to control character */
 #define C(c) ((c) - 'a' + 1)
 #define ESC 27
@@ -142,9 +144,11 @@
  */
 #define EOBCH '~'
 
-/* size_t integer overflow tests */
+#ifndef ST_OVERFLOW_TESTS
+#define ST_OVERFLOW_TESTS
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
+#endif
 
 /* ASCII test for unsigned input that could be larger than UCHAR_MAX */
 #define ISASCII(u) ((u) <= 127)
@@ -991,37 +995,51 @@ void centre_cursor(struct buffer *b, size_t num_up, size_t limit)
 {
     char *q;
     q = b->g;
+    ++num_up;
     while (num_up && limit && q != b->a) {
         --limit;
         if (*--q == '\n')
             --num_up;
     }
+    if (q == b->a) {
+        b->d = 0;
+        return;
+    }
     if (num_up) {
         b->d = b->g - b->a;     /* Failed, so draw from cursor */
         return;
     }
-    while (q != b->a && *(q - 1) != '\n')
-        --q;
+    if (*q == '\n')
+        ++q;
     b->d = q - b->a;
 }
 
-void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
-                 size_t h, size_t w, char *ns, size_t * cy, size_t * cx,
-                 int centre)
+void draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
+                 int cla, int cr, size_t * cy, size_t * cx, int centre)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
     char *q;
-    unsigned char uch;
-    size_t v;                   /* Virtual screen index */
+    size_t h, w;                /* Screen height and width */
     /* Height of text buffer portion of the screen */
-    size_t th = h > 2 ? h - 2 : 1;
+    size_t th;                  /* Text portion screen height */
     size_t ci = b->g - b->a;    /* Cursor index */
-    size_t ta = th * w;         /* Text screen area */
-    size_t hth = th > 2 ? th / 2 : 1;   /* Half the text screen height */
-    size_t hta = hth * w;       /* Half the text screen area */
-    size_t j;                   /* Filename character index */
-    size_t len;                 /* Used for printing the filename */
-    size_t i;                   /* Index for printing tabs */
+    size_t ta;                  /* Text screen area */
+    size_t hth;                 /* Half the text screen height */
+    size_t hta;                 /* Half the text screen area */
+    size_t i;                   /* Filename character index */
+    size_t len;                 /* Filename length */
+    int r;                      /* If PRINT_CH failed */
+
+    GET_MAX(g, h, w);
+
+    th = h > 2 ? h - 2 : 1;
+    ta = th * w;
+    hth = th > 2 ? th / 2 : 1;
+    hta = hth * w;
+
+    /* Do graphics only if screen is big enough */
+    if (h || w)
+        return;
 
     /* Text buffer */
 
@@ -1032,49 +1050,35 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
     if (ci < b->d || ci - b->d >= ta)
         centre = 1;
 
+/*
   text_draw:
+
     if (centre)
         centre_cursor(b, hth, hta);
-
-    v = 0;
-    q = b->a + b->d;
+*/
     /* Print before the gap */
-    while (q != b->g && v / w != th) {
-        /*
-         * When a newline character is encountered, complete the screen
-         * line with spaces. The modulus will be zero at the start of
-         * the next screen line. The "do" makes it work when the '\n'
-         * is the first character on a screen line.
-         */
-        VPUTCH(*q++);
-    }
-
-    if (q != b->g) {
-        /* Cursor is outside of text portion of screen */
+    q = b->a + b->d;
+    while (q != b->g)
+        PRINT_CH(g, *q, r);
+/*
+        -- Cursor is outside of text portion of screen --
         if (!centre)
             centre = 1;
         else {
             centre = 0;
-            b->d = b->g - b->a; /* Draw from cursor */
+            b->d = b->g - b->a; -- Draw from cursor --
         }
         goto text_draw;
     }
+*/
 
     /* Record cursor's screen location */
-    *cy = v / w;
-    *cx = v % w;
-    q = b->c;
-    /* Print after the gap */
-    do {
-        VPUTCH(*q);
-        /* Stop if have reached the status bar, before printing there */
-        if (v / w == th)
-            break;
-    } while (q++ != b->e);
+    GET_CURSOR(g, *cy, *cx);
 
-    /* Fill in unused text region with spaces */
-    while (v / w != th)
-        *(ns + v++) = ' ';
+    /* Print after the gap */
+    q = b->c;
+    while (q <= b->e)
+        PRINT_CH(g, *q, r);
 
     /* Stop if screen is only one row high */
     if (h == 1)
@@ -1082,69 +1086,83 @@ void draw_screen(struct buffer *b, struct buffer *cl, int cla, int cr,
 
     /*
      * Status bar:
-     * Print indicator if last command failed.
      */
-    *(ns + v++) = cr ? '!' : ' ';
+
+    /* Move to status bar */
+    MOVE_CURSOR(g, th, 0);
+
+    /* Print indicator if last command failed */
+    if (cr)
+        PRINT_CH(g, '!', r);
+    else
+        PRINT_CH(g, ' ', r);
 
     /* Blank space */
     if (w >= 2) {
-        *(ns + v++) = ' ';
+        PRINT_CH(g, ' ', r);
     }
 
     /* Print filename */
     if (w > 2 && b->fn != NULL) {
         len = strlen(b->fn);
-        /* Truncate filename if screen is not wide enough */
-        len = len < w - 4 ? len : w - 4;
-        /* Print file name in status bar */
-        for (j = 0; j < len; ++j)
-            *(ns + v++) = *(b->fn + j);
+        for (i = 0; i < len; ++i)
+            PRINT_CH(g, *(b->fn + i), r);
     }
-    /* Complete status bar with spaces */
-    while (v / w != h - 1)
-        *(ns + v++) = ' ';
 
     /* Stop if screen is only two rows high */
     if (h == 2)
         return;
 
     /* Command line buffer */
+
+    /* Move to command line */
+    MOVE_CURSOR(g, th + 1, 0);
+
+    /* Reusing ci, centre, and q variables for the command line */
 /*
+    ci = cl->g - cl->a;
+    centre = 0;
+    if (ci < cl->d || ci - cl->d >= w)
+        centre = 1;
+
 cl_draw:
+*/
+/*
+  if (centre)
     centre_cursor(cl, 0, w);
 */
+
     q = cl->a + cl->d;
     /* Print before the gap */
-    while (q != cl->g) {
-        VPUTCH(*q++);
+    while (q != cl->g)
+        PRINT_CH(g, *q, r);
+/*
+        -- Cursor is outside of text portion of screen --
+        if (!centre)
+            centre = 1;
+        else {
+            centre = 0;
+            cl->d = cl->g - cl->a; -- Draw from cursor --
+        }
+        goto cl_draw;
     }
-
+*/
 
     /* If the command line is active, record cursor's screen location */
     if (cla) {
-        *cy = v / w;
-        *cx = v % w;
+        GET_CURSOR(g, *cy, *cx);
     }
     q = cl->c;
     /* Print after the gap */
-    while (1) {
-        VPUTCH(*q);
-        /* Stop if off the bottom of the screen, before printing there */
-        if (v / w == h)
-            break;
-        if (q == cl->e)
-            break;
-        ++q;
-    }
-    /* Fill in unused text region with spaces */
-    while (v / w != h)
-        *(ns + v++) = ' ';
+    while (q <= cl->e)
+        PRINT_CH(g, *q, r);
 }
 
 int main(int argc, char **argv)
 {
     int ret = 0;                /* Editor's return value */
     int running = 1;            /* Editor is running */
+    struct graph *g;            /* Used for lcurses */
     size_t cy, cx;              /* Cursor's screen coordinates */
     struct tb *z = NULL;        /* The text buffers */
     struct buffer *cl = NULL;   /* Command line buffer */
@@ -1158,14 +1176,16 @@ int main(int argc, char **argv)
     struct mem *p = NULL;       /* Paste memory */
     int cr = 0;                 /* Command return value */
     int centre = 0;             /* Request to centre the cursor */
-    int redraw = 0;             /* Request to redraw the entire screen */
+    int hard = 0;               /* Request to clear hard the entire screen */
     struct buffer *cb;          /* Shortcut to the cursor's buffer */
     /* Keyboard key (one physical key can send multiple) */
     int key;
     int digit;                  /* Numerical digit */
     size_t mult;                /* Command multiplier (cannot be zero) */
-    char *t;                    /* Temporary pointer */
     size_t i;                   /* Generic index */
+
+    if ((g = init_graphics()) == NULL)
+        return 1;
 
     /* Process command line arguments */
     if (argc > 1) {
@@ -1214,6 +1234,19 @@ int main(int argc, char **argv)
 
         /* Top of the editor loop */
       top:
+
+        if (clear_screen(g, hard))
+            goto clean_up;
+        /* Deactivate clear hard */
+        hard = 0;
+        draw_screen(g, *(z->z + z->a), cl, cla, cr, &cy, &cx, centre);
+        /* Clear centre request */
+        centre = 0;
+
+        refresh_screen(g);
+
+        /* Top left corner is (1, 1) not (0, 0) so need to add one */
+        MOVE_CURSOR(g, cy + 1, cx + 1);
 
         /* Reset command return value */
         cr = 0;
@@ -1295,7 +1328,7 @@ int main(int argc, char **argv)
                 cr = copy_region(cb, p, 0);
                 goto top;
             case REDRAW:
-                redraw = 1;
+                hard = 1;
                 goto top;
 #ifndef _WIN32
             case '[':
@@ -1503,6 +1536,8 @@ int main(int argc, char **argv)
     }
 
   clean_up:
+    if (close_graphics(g))
+        ret = 1;
     /* Free memory */
     free_buffer(cl);
     free_tb(z);

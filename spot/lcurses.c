@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2020 Logan Ryan McLintock
  *
@@ -30,74 +31,31 @@
 #endif
 
 /*
-#include <ctype.h>
+
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
 */
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "lcurses.h"
 
-/* Number of spaces used to display a tab */
-#define TABSIZE 4
-
-/* ANSI escape sequences */
-#define CLEAR_SCREEN() printf("\033[2J")
-#define CLEAR_LINE() printf("\033[2K")
-#define MOVE_CURSOR(y, x) printf("\033[%lu;%luH", (unsigned long) (y), \
-    (unsigned long) (x))
-
-#ifdef _WIN32
-#define GETCH() _getch()
-#else
-#define GETCH() getchar()
-#endif
-
-/* size_t integer overflow tests */
+#ifndef ST_OVERFLOW_TESTS
+#define ST_OVERFLOW_TESTS
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
-
-
-#define VPUTCH(ch) do { \
-    uch = (unsigned char) ch; \
-    if (isgraph(uch) || uch == ' ') { \
-        *(ns + v++) = uch; \
-    } else if (uch == '\n') { \
-        do { \
-            *(ns + v++) = ' '; \
-        } while (v % w); \
-    } else if (uch == '\t') { \
-        for (i = 0; i < TABSIZE; ++i) \
-            *(ns + v++) = ' '; \
-    } else if (uch >= 1 && uch <= 26) { \
-        *(ns + v++) = '^'; \
-        *(ns + v++) = 'A' + uch - 1; \
-    } else if (!uch) { \
-        *(ns + v++) = '\\'; \
-        *(ns + v++) = '0'; \
-    } else { \
-        *(ns + v++) = uch / 16 >= 10 ? uch / 16 - 10 + 'A' : uch / 16 + '0'; \
-        *(ns + v++) = uch % 16 >= 10 ? uch % 16 - 10 + 'A' : uch % 16 + '0'; \
-    } \
-} while (0)
-
-struct graph {
-    char *ns;                   /* Next screen (virtual) */
-    char *cs;                   /* Current screen (virtual) */
-    size_t vms;                 /* Virtual memory size */
-    size_t h;                   /* Screen height (real) */
-    size_t w;                   /* Screen width (real) */
-    size_t sa;                  /* Screen area (real) */
-    size_t v;                   /* Virtual index */
-#ifndef _WIN32
-    struct termios t_orig;      /* Original terminal attributes */
 #endif
-};
 
-int get_screen_size(size_t * height, size_t * width)
+/* ANSI escape sequences */
+#define PHY_CLEAR_SCREEN() printf("\033[2J")
+#define PHY_MOVE_CURSOR(y, x) printf("\033[%lu;%luH", (unsigned long) (y), \
+    (unsigned long) (x))
+
+static int get_screen_size(size_t * height, size_t * width)
 {
     /* Gets the screen size */
 #ifdef _WIN32
@@ -122,11 +80,15 @@ int get_screen_size(size_t * height, size_t * width)
 
 int clear_screen(struct graph *g, int hard)
 {
-    size_t new_h, new_w;
+    size_t new_h, new_w, req_vms;
     char *tmp_ns, *tmp_cs;
     if (get_screen_size(&new_h, &new_w)) {
         return 1;
     }
+
+    /* Reset virtual index */
+    g->v = 0;
+
     /* Clear hard or change in screen dimensions */
     if (hard || new_h != g->h || new_w != g->w) {
         g->h = new_h;
@@ -134,12 +96,21 @@ int clear_screen(struct graph *g, int hard)
         if (MOF(g->h, g->w))
             return 1;
         g->sa = g->h * g->w;
+        /*
+         * Add TABSIZE to the end of the virtual screen to
+         * allow for characters to be printed off the screen.
+         * Assumes that tab consumes the most screen space
+         * out of all the characters.
+         */
+        if (AOF(g->sa, TABSIZE))
+            return 1;
+        req_vms = g->sa + TABSIZE;
         /* Bigger screen */
-        if (g->vms < g->sa) {
-            if ((tmp_ns = calloc(g->sa, 1)) == NULL) {
+        if (g->vms < req_vms) {
+            if ((tmp_ns = malloc(req_vms)) == NULL) {
                 return 1;
             }
-            if ((tmp_cs = calloc(g->sa, 1)) == NULL) {
+            if ((tmp_cs = malloc(req_vms)) == NULL) {
                 free(tmp_ns);
                 return 1;
             }
@@ -147,17 +118,14 @@ int clear_screen(struct graph *g, int hard)
             g->ns = tmp_ns;
             free(g->cs);
             g->cs = tmp_cs;
-            g->vms = g->sa;
-            /* Clear the physical screen */
-            CLEAR_SCREEN();
-            return 0;
+            g->vms = req_vms;
         }
         /*
          * Clear the virtual current screen. No need to erase the
          * virtual screen beyond the physical screen size.
          */
         memset(g->cs, ' ', g->sa);
-        CLEAR_SCREEN();
+        PHY_CLEAR_SCREEN();
     }
     /* Clear the virtual next screen */
     memset(g->ns, ' ', g->sa);
@@ -167,7 +135,7 @@ int clear_screen(struct graph *g, int hard)
 int close_graphics(struct graph *g)
 {
     int ret = 0;
-    CLEAR_SCREEN();
+    PHY_CLEAR_SCREEN();
 #ifndef _WIN32
     if (tcsetattr(STDIN_FILENO, TCSANOW, &g->t_orig))
         ret = 1;
@@ -230,17 +198,17 @@ struct graph *init_graphics(void)
     return g;
 }
 
-void diff_draw(struct graph *g)
+static void diff_draw(struct graph *g)
 {
     /* Physically draw the screen where the virtual screens differ */
     int in_pos = 0;             /* In position for printing */
     char ch;
-    for (g->v = 0; g->v < g->sa; ++g->v) {
-        if ((ch = *(g->ns + g->v)) != *(g->cs + g->v)) {
+    size_t i;
+    for (i = 0; i < g->sa; ++i) {
+        if ((ch = *(g->ns + i)) != *(g->cs + i)) {
             if (!in_pos) {
                 /* Top left corner is (1, 1) not (0, 0) so need to add one */
-                MOVE_CURSOR(g->v / g->w + 1,
-                            g->v - (g->v / g->w) * g->w + 1);
+                PHY_MOVE_CURSOR(i / g->w + 1, i % g->w + 1);
                 in_pos = 1;
             }
             putchar(ch);
@@ -254,20 +222,13 @@ void refresh_screen(struct graph *g)
 {
     char *t;
     diff_draw(g);
-
+    /* Set physical cursor to the position of the virtual cursor */
+    if (g->v < g->sa)
+        PHY_MOVE_CURSOR(g->v / g->w + 1, g->v % g->w + 1);
+    else
+        PHY_MOVE_CURSOR(g->h, g->w);
     /* Swap virtual screens */
     t = g->cs;
     g->cs = g->ns;
     g->ns = t;
 }
-
-/*
-        -- Do graphics only if screen is big enough --
-        if (new_h >= 1 && new_w >= 1) {
-            draw_screen(*(z->z + z->a), cl, cla, cr, h, w, ns, &cy, &cx,
-                        centre);
-            -- Clear centre request --
-            centre = 0;
-            -- Top left corner is (1, 1) not (0, 0) so need to add one --
-            MOVE_CURSOR(cy + 1, cx + 1);
-*/
