@@ -1015,11 +1015,12 @@ void centre_cursor(struct buffer *b, size_t num_up, size_t limit)
 }
 
 void draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
-                 int cla, int cr, size_t * cy, size_t * cx, int centre)
+                 int cla, int cr, int centre)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
-    char *q;
+    char *q, ch;
     size_t h, w;                /* Screen height and width */
+    size_t cy, cx;              /* Final coordinates of the cursor */
     /* Height of text buffer portion of the screen */
     size_t th;                  /* Text portion screen height */
     size_t ci = b->g - b->a;    /* Cursor index */
@@ -1038,7 +1039,7 @@ void draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
     hta = hth * w;
 
     /* Do graphics only if screen is big enough */
-    if (h || w)
+    if (!h || !w)
         return;
 
     /* Text buffer */
@@ -1058,8 +1059,10 @@ void draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
 */
     /* Print before the gap */
     q = b->a + b->d;
-    while (q != b->g)
-        PRINT_CH(g, *q, r);
+    while (q != b->g) {
+        ch = *q++;
+        PRINT_CH(g, ch, r);
+    }
 /*
         -- Cursor is outside of text portion of screen --
         if (!centre)
@@ -1073,12 +1076,14 @@ void draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
 */
 
     /* Record cursor's screen location */
-    GET_CURSOR(g, *cy, *cx);
+    GET_CURSOR(g, cy, cx);
 
     /* Print after the gap */
     q = b->c;
-    while (q <= b->e)
-        PRINT_CH(g, *q, r);
+    while (q <= b->e) {
+        ch = *q++;
+        PRINT_CH(g, ch, r);
+    }
 
     /* Stop if screen is only one row high */
     if (h == 1)
@@ -1134,8 +1139,10 @@ cl_draw:
 
     q = cl->a + cl->d;
     /* Print before the gap */
-    while (q != cl->g)
-        PRINT_CH(g, *q, r);
+    while (q != cl->g) {
+        ch = *q++;
+        PRINT_CH(g, ch, r);
+    }
 /*
         -- Cursor is outside of text portion of screen --
         if (!centre)
@@ -1150,12 +1157,16 @@ cl_draw:
 
     /* If the command line is active, record cursor's screen location */
     if (cla) {
-        GET_CURSOR(g, *cy, *cx);
+        GET_CURSOR(g, cy, cx);
     }
     q = cl->c;
     /* Print after the gap */
-    while (q <= cl->e)
-        PRINT_CH(g, *q, r);
+    while (q <= cl->e) {
+        ch = *q++;
+        PRINT_CH(g, ch, r);
+    }
+
+    MOVE_CURSOR(g, cy, cx);
 }
 
 int main(int argc, char **argv)
@@ -1163,7 +1174,6 @@ int main(int argc, char **argv)
     int ret = 0;                /* Editor's return value */
     int running = 1;            /* Editor is running */
     struct graph *g;            /* Used for lcurses */
-    size_t cy, cx;              /* Cursor's screen coordinates */
     struct tb *z = NULL;        /* The text buffers */
     struct buffer *cl = NULL;   /* Command line buffer */
     int cla = 0;                /* Command line buffer is active */
@@ -1239,14 +1249,11 @@ int main(int argc, char **argv)
             goto clean_up;
         /* Deactivate clear hard */
         hard = 0;
-        draw_screen(g, *(z->z + z->a), cl, cla, cr, &cy, &cx, centre);
+        draw_screen(g, *(z->z + z->a), cl, cla, cr, centre);
         /* Clear centre request */
         centre = 0;
 
         refresh_screen(g);
-
-        /* Top left corner is (1, 1) not (0, 0) so need to add one */
-        MOVE_CURSOR(g, cy + 1, cx + 1);
 
         /* Reset command return value */
         cr = 0;

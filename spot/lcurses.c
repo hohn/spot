@@ -52,6 +52,7 @@
 
 /* ANSI escape sequences */
 #define PHY_CLEAR_SCREEN() printf("\033[2J")
+/* Index starts at one. Top left is (1, 1) */
 #define PHY_MOVE_CURSOR(y, x) printf("\033[%lu;%luH", (unsigned long) (y), \
     (unsigned long) (x))
 

@@ -31,6 +31,7 @@
 #define GETCH() getchar()
 #endif
 
+/* Index starts from zero. Top left is (0, 0) */
 #define MOVE_CURSOR(g, y, x) g->v = (y) * g->w + (x)
 
 #define GET_CURSOR(g, y, x) do { \
@@ -43,6 +44,7 @@
     x = g->w; \
 } while (0)
 
+/* Evaluates ch more than once */
 #define PRINT_CH(g, ch, ret) do { \
     if (g->v < g->sa) { \
         if (isgraph((unsigned char) ch) || ch == ' ') { \
