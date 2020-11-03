@@ -24,7 +24,6 @@
 /* Number of spaces used to display a tab (must be at least */
 #define TABSIZE 4
 
-
 #ifdef _WIN32
 #define GETCH() _getch()
 #else
@@ -32,7 +31,23 @@
 #endif
 
 /* Index starts from zero. Top left is (0, 0) */
-#define MOVE_CURSOR(g, y, x) g->v = (y) * g->w + (x)
+#define MOVE_CURSOR(g, y, x, ret) do { \
+    if ((y) < g->h && (x) < g->w) { \
+        g->v = (y) * g->w + (x); \
+        ret = 0; \
+    } else { \
+        ret = 1; \
+    } \
+} while (0)
+
+#define CLEAR_DOWN(g, ret) do { \
+    if (g->v < g->sa) { \
+        memset(g->ns + g->v, ' ', g->sa - g->v); \
+        ret = 0; \
+    } else { \
+        ret = 1; \
+    } \
+} while (0)
 
 #define GET_CURSOR(g, y, x) do { \
     y = g->v / g->w; \
@@ -56,16 +71,19 @@
         } else if (ch == '\t') { \
             memset(g->ns + g->v, ' ', TABSIZE); \
             g->v += TABSIZE; \
+        } else if ((unsigned char) ch >= 1 && (unsigned char) ch <= 26) { \
+            *(g->ns + g->v++) = '^'; \
+            *(g->ns + g->v++) = 'A' + (unsigned char) ch - 1; \
         } else if (ch == '\0') { \
             *(g->ns + g->v++) = '\\'; \
             *(g->ns + g->v++) = '0'; \
         } else { \
             *(g->ns + g->v++) = (unsigned char) ch / 16 < 10 \
                 ? (unsigned char) ch / 16 + '0' \
-                : (unsigned char) ch / 16 + 'A'; \
+                : (unsigned char) ch / 16 - 10 + 'A'; \
             *(g->ns + g->v++) = (unsigned char) ch % 16 < 10 \
                 ? (unsigned char) ch % 16 + '0' \
-                : (unsigned char) ch % 16 + 'A'; \
+                : (unsigned char) ch % 16 - 10 + 'A'; \
         } \
         ret = 0; \
     } else { \
