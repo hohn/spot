@@ -21,6 +21,16 @@
 #ifndef LCURSES_H
 #define LCURSES_H
 
+#ifdef _WIN32
+#include <windows.h>
+#include <conio.h>
+#include <io.h>
+#else
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+#endif
+
 /* Number of spaces used to display a tab (must be at least */
 #define TABSIZE 4
 

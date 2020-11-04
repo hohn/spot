@@ -27,19 +27,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <conio.h>
-#include <io.h>
-#else
-#include <sys/ioctl.h>
-#include <sys/wait.h>
-#include <termios.h>
-#include <unistd.h>
 #endif
 
 #include <ctype.h>
-#include <errno.h>
 #include <limits.h>
-#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
