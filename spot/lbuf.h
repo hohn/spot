@@ -37,9 +37,19 @@
 
 /* One character operations with no out of bounds checking */
 /* Move left */
-#define LCH() (*--b->c = *--b->g)
+#define LCH() do { \
+    *--b->c = *--b->g; \
+    if (*b->c == '\n') \
+        --b->r; \
+} while (0)
+
 /* Move right */
-#define RCH() (*b->g++ = *b->c++)
+#define RCH() do { \
+    if (*b->c == '\n') \
+        ++b->r; \
+    *b->g++ = *b->c++; \
+} while (0)
+
 /* Delete */
 #define DCH() (b->c++)
 
@@ -62,6 +72,7 @@ struct buffer {
     char *g;                    /* Start of gap */
     char *c;                    /* Cursor (after gap) */
     char *e;                    /* End of buffer */
+    size_t r;                   /* Row number (starting from 1) */
     size_t d;                   /* Draw start index */
     size_t m;                   /* Mark index */
     int m_set;                  /* Mark set indicator */
