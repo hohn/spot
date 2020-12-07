@@ -19,15 +19,6 @@
  * lcurses: A minimalistic double buffering curses module.
  */
 
-#ifdef _WIN32
-#include <windows.h>
-#include <io.h>
-#else
-#include <sys/ioctl.h>
-#include <termios.h>
-#include <unistd.h>
-#endif
-
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
