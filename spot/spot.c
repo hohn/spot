@@ -19,23 +19,6 @@
  * Dedicated to my son who was only a 4mm `spot' in his first ultrasound.
  */
 
-/*
- * README:
- * Depending on your system:
- * > cl spot.c
- * or
- * $ cc spot.c && mv a.out spot
- * and place spot.exe or spot somewhere in your PATH.
- *
- * spot:
- * - Is cross-platform.
- * - Does not use any curses library.
- * - Uses a double buffering method for graphics which has no flickering.
- * - Uses the gap buffer method for text with transactional operations.
- * - Uses the Quick Search algorithm with a reusable bad character table on
-     repeated searches.
- */
-
 #ifdef __linux__
 #define _XOPEN_SOURCE 500
 #endif
