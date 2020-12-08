@@ -36,22 +36,28 @@
 #define EOBCH '~'
 
 /* One character operations with no out of bounds checking */
-/* Move left */
-#define LCH() do { \
+/* Move left without keeping track of the row number */
+#define LCH_NO_R(b) (*--b->c = *--b->g)
+
+/* Move left while keeping track of the row number */
+#define LCH(b) do { \
     *--b->c = *--b->g; \
     if (*b->c == '\n') \
         --b->r; \
 } while (0)
 
-/* Move right */
-#define RCH() do { \
+/* Move right while keeping track of the row number */
+#define RCH(b) do { \
     if (*b->c == '\n') \
         ++b->r; \
     *b->g++ = *b->c++; \
 } while (0)
 
-/* Delete */
-#define DCH() (b->c++)
+/* Delete (never changes the row number) */
+#define DCH(b) (b->c++)
+
+/* Backspace while keeping track of the row number */
+#define BSPC(b) if (*--b->g == '\n') --b->r
 
 #ifndef ST_OVERFLOW_TESTS
 #define ST_OVERFLOW_TESTS
@@ -73,16 +79,23 @@ struct buffer {
     char *c;                    /* Cursor (after gap) */
     char *e;                    /* End of buffer */
     size_t r;                   /* Row number (starting from 1) */
+    size_t col;                 /* Column index (starting from 0) */
     size_t d;                   /* Draw start index */
     size_t m;                   /* Mark index */
+    size_t mr;                  /* Mark row number */
     int m_set;                  /* Mark set indicator */
+    int mod;                    /* Modified buffer indicator */
 };
 
-/* Memory structure: used for copy and paste, and search */
+/*
+ * Memory structure: used for copy/paste and search.
+ * The rows element is only used by copy/paste.
+ */
 struct mem {
     char *p;                    /* Pointer to memory */
     size_t u;                   /* Used memory amount (<= s) */
     size_t s;                   /* Memory size */
+    size_t rows;                /* Number of rows in used memory */
 };
 
 int move_left(struct buffer *b, size_t mult);

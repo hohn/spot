@@ -93,11 +93,11 @@
  * ESC prefix
  */
 #define COPY 'w'
-#define REPSEARCH '/'
-#define REDRAW '-'
+#define REPSEARCH 'n'
+#define REDRAW 'L'
 #define STARTBUF '<'
 #define ENDBUF '>'
-#define MATCHBRACE '='
+#define MATCHBRACE 'm'
 
 /* Default number of spare text buffer pointers. Must be at least 1 */
 #define SPARETB 10
@@ -213,6 +213,9 @@ int new_buffer(struct tb *z, char *fn)
             return 1;
         }
     }
+    /* Clear mod indicator */
+    b->mod = 0;
+
     /* Success */
     *(z->z + z->u) = b;         /* Link back */
     z->a = z->u;                /* Set active text buffer to the new one */
@@ -220,11 +223,13 @@ int new_buffer(struct tb *z, char *fn)
     return 0;
 }
 
-int draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
-                int cla, int cr, int centre, int hard)
+int draw_screen(struct graph *g, struct buffer *b, struct mem *sb,
+                struct buffer *cl, int cla, int cr, int centre, int hard)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
-    char *q, ch;
+    char *q, ch;                /* Generic pointer and value */
+    char *t;                    /* Status bar temporary pointer */
+    size_t s;                   /* Status bar temporary size */
     size_t h, w;                /* Screen height and width */
     size_t y, x;                /* Transient coordinates */
     size_t cy, cx;              /* Final coordinates of the cursor */
@@ -237,7 +242,6 @@ int draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
     size_t row_up;              /* Number of rows to reverse scan for */
     size_t cap;                 /* Reverse scan cutoff */
     size_t i;                   /* Filename character index */
-    size_t len;                 /* Filename length */
     int r;                      /* Return value of graphics macro functions */
 
     if (clear_screen(g, hard))
@@ -321,27 +325,33 @@ int draw_screen(struct graph *g, struct buffer *b, struct buffer *cl,
         return 1;
     CLEAR_DOWN(g, r);
 
-    /* Print indicator if last internal command failed */
-    if (cr)
-        PRINT_CH(g, '!', r);
-    else
-        PRINT_CH(g, ' ', r);
-
-    /* Blank space */
-    if (w >= 2) {
-        PRINT_CH(g, ' ', r);
+    /* Check that memory allocation is large enough */
+    if (AOF(w, 1))
+        return 1;
+    s = w + 1;
+    if (s > sb->s) {
+        if ((t = malloc(s)) == NULL)
+            return 1;
+        free(sb->p);
+        sb->p = t;
+        sb->s = s;
     }
 
-    /* Print filename */
-    if (w > 2 && b->fn != NULL) {
-        len = strlen(b->fn);
+    if (snprintf(sb->p, sb->s,
+                 "%c%c %s (%lu, %lu)%c",
+                 cr ? '!' : ' ', b->mod ? '*' : ' ', b->fn, b->r, b->col,
+                 b->m_set ? 'm' : ' ') < 0)
+        return 1;
 
-        for (i = 0; i < len; ++i) {
-            PRINT_CH(g, *(b->fn + i), r);
-            GET_CURSOR(g, y, x);
-            if (y != th)
-                break;
-        }
+    /* Print status bar */
+    for (i = 0; i < w; ++i) {
+        ch = *(sb->p + i);
+        if (ch == '\0')
+            break;
+        PRINT_CH(g, ch, r);
+        GET_CURSOR(g, y, x);
+        if (y != th)
+            break;
     }
 
     /* Stop if screen is only two rows high */
@@ -410,6 +420,7 @@ int main(int argc, char **argv)
     size_t bad[UCHAR_MAX + 1];
     struct mem *se = NULL;      /* Search memory */
     struct mem *p = NULL;       /* Paste memory */
+    struct mem *sb = NULL;      /* Status bar */
     int cr = 0;                 /* Command return value */
     int centre = 0;             /* Request to centre the cursor */
     int hard = 0;               /* Request to clear hard the entire screen */
@@ -465,13 +476,19 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Initialise status bar memory */
+    if ((sb = init_mem()) == NULL) {
+        ret = 1;
+        goto clean_up;
+    }
+
     /* Editor loop */
     while (running) {
 
         /* Top of the editor loop */
       top:
 
-        draw_screen(g, *(z->z + z->a), cl, cla, cr, centre, hard);
+        draw_screen(g, *(z->z + z->a), sb, cl, cla, cr, centre, hard);
         /* Clear centre request */
         centre = 0;
         /* Deactivate clear hard */
@@ -774,6 +791,7 @@ int main(int argc, char **argv)
     free_tb(z);
     free_mem(se);
     free_mem(p);
+    free_mem(sb);
     free(cl_str);
     return ret;
 }
