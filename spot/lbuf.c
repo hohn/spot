@@ -336,56 +336,68 @@ void set_bad(size_t * bad, struct mem *se)
         *(bad + *(pat + i)) = se->u - i;
 }
 
-int search(struct buffer *b, struct mem *se, size_t * bad)
+char *memmatch(char *big, size_t bs, char *small, size_t ss, size_t * bad)
 {
     /*
-     * Forward search, excludes cursor and EOBCH.
-     * Uses the Quick Search algorithm.
+     * Returns the first occurance of small in big.
+     * If ss >= 1 then the Quick Search algorithm is used
+     * and the bad character table must be provided.
      */
     char *q, *stop, *q_copy, *pat;
     size_t patlen;
     int found = 0;
-    size_t s;
-    if (!se->u)
-        return 1;
+
+    /*
+     * Not possible to find anything. Note that a zero ss is not considered
+     * a match at the start of big.
+     */
+    if (big == NULL || !bs || small == NULL || !ss || ss > bs)
+        return NULL;
+
+    if (ss == 1) {
+        /* Single character pattern */
+        return memchr(big, *small, bs);
+    }
+    /* Quick Search algorithm */
+    q = big;
+    stop = big + bs - ss;       /* Inclusive stop pointer */
+    while (q <= stop) {
+        q_copy = q;
+        pat = small;
+        patlen = ss;
+        /* Compare pattern to text */
+        do {
+            if (*q_copy++ != *pat++)
+                break;
+        } while (--patlen);
+        /* Match found */
+        if (!patlen) {
+            found = 1;
+            break;
+        }
+        /* Jump using the bad character table */
+        q += *(bad + (unsigned char) *(q + ss));
+    }
+    if (!found)
+        return NULL;
+    else
+        return q;
+}
+
+int search(struct buffer *b, struct mem *se, size_t * bad)
+{
+    /* Forward search, excludes cursor and EOBCH */
+    char *q;
     if (b->e - b->c <= 1)
         return 1;
-    s = b->e - b->c - 1;
-    if (se->u > s)
+    if ((q =
+         memmatch(b->c + 1, b->e - (b->c + 1), se->p, se->u, bad)) == NULL)
         return 1;
-    if (se->u == 1) {
-        /* Single character patterns */
-        q = memchr(b->c + 1, *se->p, s);
-        if (q == NULL)
-            return 1;
-    } else {
-        /* Quick Search algorithm */
-        q = b->c + 1;
-        stop = b->e - se->u;    /* Inclusive */
-        while (q <= stop) {
-            q_copy = q;
-            pat = se->p;
-            patlen = se->u;
-            /* Compare pattern to text */
-            do {
-                if (*q_copy++ != *pat++)
-                    break;
-            } while (--patlen);
-            /* Match found */
-            if (!patlen) {
-                found = 1;
-                break;
-            }
-            /* Jump using the bad character table */
-            q += *(bad + (unsigned char) *(q + se->u));
-        }
-        if (!found)
-            return 1;
-
-    }
     move_right(b, q - b->c);    /* Must be in bounds */
     return 0;
 }
+
+/* replace(*(z->z + z->a), rp); */
 
 static int grow_gap(struct buffer *b, size_t req)
 {

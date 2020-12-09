@@ -36,6 +36,8 @@
 #include "lbuf.h"
 #include "lcurses.h"
 
+#define ALPHABET_SIZE 26
+
 /* Convert lowercase letter to control character */
 #define C(c) ((c) - 'a' + 1)
 #define ESC 27
@@ -63,11 +65,12 @@
 #define CUT C('w')
 /* Yank */
 #define PASTE C('y')
-/* Reverse kill */
-#define CUTTOSOL C('r')
-/* Kill */
+/* Kill to origin of line */
+#define CUTTOSOL C('o')
+/* Kill to end of line */
 #define CUTTOEOL C('k')
 #define SEARCH C('s')
+#define REPLACE C('r')
 /* Level cursor on screen */
 #define CENTRE C('l')
 /* Deactivates the mark or exits the command line */
@@ -75,13 +78,16 @@
 #define TRIMCLEAN C('t')
 /* Quote hex */
 #define INSERTHEX C('q')
+/* Change paste memory (a to z) */
+#define CHANGEPASTE C('c')
 
 /*
  * Cx prefix
  */
+/* These are typically buffer or file related commands */
 #define SAVE C('s')
 #define INSERTFILE 'i'
-#define RENAME C('w')
+#define RENAME 'r'
 /* Open file */
 #define NEWBUF C('f')
 /* Close without prompting to save */
@@ -101,7 +107,6 @@
 
 /* Default number of spare text buffer pointers. Must be at least 1 */
 #define SPARETB 10
-
 
 /* Structure to keep track of the text buffers */
 struct tb {
@@ -224,7 +229,8 @@ int new_buffer(struct tb *z, char *fn)
 }
 
 int draw_screen(struct graph *g, struct buffer *b, struct mem *sb,
-                struct buffer *cl, int cla, int cr, int centre, int hard)
+                struct buffer *cl, int cla, size_t ap, int cr, int centre,
+                int hard)
 {
     /* Virtually draw screen (and clear unused sections on the go) */
     char *q, ch;                /* Generic pointer and value */
@@ -338,9 +344,9 @@ int draw_screen(struct graph *g, struct buffer *b, struct mem *sb,
     }
 
     if (snprintf(sb->p, sb->s,
-                 "%c%c %s (%lu, %lu)%c",
+                 "%c%c %s (%lu, %lu) %c%c",
                  cr ? '!' : ' ', b->mod ? '*' : ' ', b->fn, b->r, b->col,
-                 b->m_set ? 'm' : ' ') < 0)
+                 'a' + (char) ap, b->m_set ? 'm' : ' ') < 0)
         return 1;
 
     /* Print status bar */
@@ -419,8 +425,10 @@ int main(int argc, char **argv)
     /* Bad character table for the Quick Search algorithm */
     size_t bad[UCHAR_MAX + 1];
     struct mem *se = NULL;      /* Search memory */
-    struct mem *p = NULL;       /* Paste memory */
+    struct mem *rp = NULL;      /* Replace memory */
     struct mem *sb = NULL;      /* Status bar */
+    struct mem *p[ALPHABET_SIZE] = { NULL };    /* Paste memories (a to z) */
+    size_t ap = 0;              /* Active paste memory */
     int cr = 0;                 /* Command return value */
     int centre = 0;             /* Request to centre the cursor */
     int hard = 0;               /* Request to clear hard the entire screen */
@@ -470,8 +478,9 @@ int main(int argc, char **argv)
         ret = 1;
         goto clean_up;
     }
-    /* Initialise paste memory */
-    if ((p = init_mem()) == NULL) {
+
+    /* Initialise replace memory */
+    if ((rp = init_mem()) == NULL) {
         ret = 1;
         goto clean_up;
     }
@@ -482,13 +491,21 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Initialise paste memories */
+    for (i = 0; i < ALPHABET_SIZE; ++i) {
+        if ((*(p + i) = init_mem()) == NULL) {
+            ret = 1;
+            goto clean_up;
+        }
+    }
+
     /* Editor loop */
     while (running) {
 
         /* Top of the editor loop */
       top:
 
-        draw_screen(g, *(z->z + z->a), sb, cl, cla, cr, centre, hard);
+        draw_screen(g, *(z->z + z->a), sb, cl, cla, ap, cr, centre, hard);
         /* Clear centre request */
         centre = 0;
         /* Deactivate clear hard */
@@ -573,7 +590,7 @@ int main(int argc, char **argv)
                 cr = match_brace(cb);
                 goto top;
             case COPY:
-                cr = copy_region(cb, p, 0);
+                cr = copy_region(cb, *(p + ap), 0);
                 goto top;
             case REDRAW:
                 hard = 1;
@@ -650,10 +667,17 @@ int main(int argc, char **argv)
             set_mark(cb);
             goto top;
         case CUT:
-            cr = copy_region(cb, p, 1);
+            cr = copy_region(cb, *(p + ap), 1);
             goto top;
         case PASTE:
-            cr = paste(cb, p, mult);
+            cr = paste(cb, *(p + ap), mult);
+            goto top;
+        case CHANGEPASTE:
+            key = GETCH();
+            if (islower((unsigned char) key))
+                ap = key - 'a';
+            else
+                cr = 1;
             goto top;
         case CENTRE:
             centre = 1;
@@ -663,11 +687,16 @@ int main(int argc, char **argv)
             cla = 1;
             operation = 'S';
             goto top;
+        case REPLACE:
+            delete_buffer(cl);
+            cla = 1;
+            operation = 'P';
+            goto top;
         case CUTTOSOL:
-            cr = cut_to_sol(cb, p);
+            cr = cut_to_sol(cb, *(p + ap));
             goto top;
         case CUTTOEOL:
-            cr = cut_to_eol(cb, p);
+            cr = cut_to_eol(cb, *(p + ap));
             goto top;
         case CMDEXIT:
             if (cb->m_set) {
@@ -760,6 +789,13 @@ int main(int argc, char **argv)
                 }
                 cr = search(*(z->z + z->a), se, bad);
                 goto top;
+            case 'P':
+                if (buffer_to_mem(cl, rp)) {
+                    cr = 1;
+                    goto top;
+                }
+                /* cr = replace(*(z->z + z->a), rp); */
+                goto top;
             case 'I':
                 if (buffer_to_str(cl, &cl_str)) {
                     cr = 1;
@@ -790,7 +826,9 @@ int main(int argc, char **argv)
     free_buffer(cl);
     free_tb(z);
     free_mem(se);
-    free_mem(p);
+    free_mem(rp);
+    for (i = 0; i < ALPHABET_SIZE; ++i)
+        free_mem(*(p + i));
     free_mem(sb);
     free(cl_str);
     return ret;
