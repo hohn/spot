@@ -47,6 +47,43 @@
 /* ASCII test for unsigned input that could be larger than UCHAR_MAX */
 #define ISASCII(u) ((u) <= 127)
 
+static int grow_gap(struct buffer *b, size_t req)
+{
+    /*
+     * Increases the gap.
+     * Only called when an insert is planned with a size greater than the
+     * current gap size. It is OK for the gap to stay zero, so long as an
+     * insert is not planned. The gap is increased so that the resultant gap
+     * can fit the planned insert plus the default GAP (to avoid having to
+     * grow the gap again soon afterwards), or so that the whole buffer is
+     * doubled (to protect against repeated inserts), whichever is larger.
+     * grow_gap does not change the mark.
+     */
+    size_t rg, min_increase, current_size, target_size, increase;
+    char *t, *tc;
+    if (AOF(req, GAP))
+        return 1;
+    rg = req + GAP;
+    /* Only call grow_gap if req > (b->c - b->g) */
+    min_increase = rg - (b->c - b->g);
+    current_size = b->e - b->a + 1;
+    increase = current_size > min_increase ? current_size : min_increase;
+    if (AOF(current_size, increase))
+        return 1;
+    target_size = current_size + increase;
+    if ((t = malloc(target_size)) == NULL)
+        return 1;
+    memcpy(t, b->a, b->g - b->a);
+    tc = t + (b->c - b->a) + increase;
+    memcpy(tc, b->c, b->e - b->c + 1);
+    b->g = t + (b->g - b->a);
+    b->c = tc;
+    b->e = t + target_size - 1;
+    free(b->a);
+    b->a = t;
+    return 0;
+}
+
 void set_col_index(struct buffer *b)
 {
     /*
@@ -262,9 +299,10 @@ void delete_buffer(struct buffer *b)
 void trim_clean(struct buffer *b)
 {
     /*
-     * Trims (deletes) trailing whitespace and cleans (deletes all characters
+     * Trims (deletes) trailing whitespace and cleans. Deletes all characters
      * that are not ASCII graph, space, tab, or newline.
      */
+    size_t r_backup = b->r;
     int nl_enc = 0;             /* Trailing \n char has been encountered */
     int at_eol = 0;             /* At end of line */
     int del = 0;                /* At least one char deleted indicator */
@@ -323,17 +361,20 @@ void trim_clean(struct buffer *b)
         b->m_set = 0;
         b->mod = 1;
     }
+    /* Move forward to original row if possible */
+    while (b->r != r_backup && b->c != b->e)
+        RCH(b);
 }
 
-void set_bad(size_t * bad, struct mem *se)
+void set_bad(size_t * bad, char *p, size_t u)
 {
     /* Sets the bad character table for the Quick Search algorithm */
-    unsigned char *pat = (unsigned char *) se->p;       /* Search pattern */
+    unsigned char *pat = (unsigned char *) p;   /* Search pattern */
     size_t i;
     for (i = 0; i <= UCHAR_MAX; ++i)
-        *(bad + i) = se->u + 1;
-    for (i = 0; i < se->u; ++i)
-        *(bad + *(pat + i)) = se->u - i;
+        *(bad + i) = u + 1;
+    for (i = 0; i < u; ++i)
+        *(bad + *(pat + i)) = u - i;
 }
 
 char *memmatch(char *big, size_t bs, char *small, size_t ss, size_t * bad)
@@ -397,42 +438,134 @@ int search(struct buffer *b, struct mem *se, size_t * bad)
     return 0;
 }
 
-/* replace(*(z->z + z->a), rp); */
-
-static int grow_gap(struct buffer *b, size_t req)
+int replace(struct buffer *b, struct mem *rp)
 {
     /*
-     * Increases the gap.
-     * Only called when an insert is planned with a size greater than the
-     * current gap size. It is OK for the gap to stay zero, so long as an
-     * insert is not planned. The gap is increased so that the resultant gap
-     * can fit the planned insert plus the default GAP (to avoid having to
-     * grow the gap again soon afterwards), or so that the whole buffer is
-     * doubled (to protect against repeated inserts), whichever is larger.
-     * grow_gap does not change the mark.
+     * Performs find and replace in the region.
+     * The request must be structed as:
+     * delimiter char then find text then delimiter char then replace text.
+     * For example:
+     * /dog/cat
+     * or:
+     * ^rabbit^goat
      */
-    size_t rg, min_increase, current_size, target_size, increase;
-    char *t, *tc;
-    if (AOF(req, GAP))
+    char delim;
+    char *find_text, *divider, *replace_text;
+    size_t fts, rts;            /* Find text size. Replace text size */
+    size_t nl_count = 0;        /* Number of \n characters in replace text */
+    size_t bad[UCHAR_MAX + 1];
+    size_t ci_orig = b->g - b->a;       /* Original cursor index */
+    size_t r_tmp;
+    char *m_pointer;            /* Mark pointer */
+    char *q;
+    size_t count = 0;           /* Number of matches */
+    size_t diff;
+    size_t needed;              /* Gap needed */
+
+    /* Mark not set */
+    if (!b->m_set)
         return 1;
-    rg = req + GAP;
-    /* Only call grow_gap if req > (b->c - b->g) */
-    min_increase = rg - (b->c - b->g);
-    current_size = b->e - b->a + 1;
-    increase = current_size > min_increase ? current_size : min_increase;
-    if (AOF(current_size, increase))
+    /* Empty region, nothing to do */
+    if (b->m == ci_orig)
+        return 0;
+
+    /* Split the request into the find and replace components */
+    if (rp->u < 3)
         return 1;
-    target_size = current_size + increase;
-    if ((t = malloc(target_size)) == NULL)
+    delim = *rp->p;
+    /* Search for the divider */
+    if ((divider = memchr(rp->p + 1, delim, rp->u - 1)) == NULL)
         return 1;
-    memcpy(t, b->a, b->g - b->a);
-    tc = t + (b->c - b->a) + increase;
-    memcpy(tc, b->c, b->e - b->c + 1);
-    b->g = t + (b->g - b->a);
-    b->c = tc;
-    b->e = t + target_size - 1;
-    free(b->a);
-    b->a = t;
+    /* Find text cannot be empty */
+    if (divider == rp->p + 1)
+        return 1;
+    find_text = rp->p + 1;
+    fts = divider - find_text;
+    rts = rp->u - fts - 2;      /* 2 for the two delimiter chars */
+    if (rts)
+        replace_text = divider + 1;
+    else
+        replace_text = NULL;
+
+    /* Count newlines in replace text */
+    q = replace_text;
+    while (q < replace_text + rts)
+        if (*q++ == '\n')
+            ++nl_count;
+
+    /*
+     * Find the number of matches in the region.
+     * The region is the space between the mark and the cursor, with the
+     * start char included and the end char excluded.The exclusion
+     * takes precedence, so that when the mark and the cursor index are
+     * the same, the region is considered empty.
+     */
+
+    /* Build bad character table */
+    set_bad(bad, find_text, fts);
+
+    if (b->m < ci_orig) {
+        /* Mark before the cursor */
+        q = b->a + b->m;
+        while ((q = memmatch(q, b->g - q, find_text, fts, bad)) != NULL) {
+            ++count;
+            ++q;                /* OK because fts >= 1 */
+        }
+    } else {
+        /* Cursor before the mark */
+        q = b->c;
+        while ((q =
+                memmatch(q, b->m - ci_orig, find_text, fts,
+                         bad)) != NULL) {
+            ++count;
+            ++q;                /* OK because fts >= 1 */
+        }
+    }
+
+    /* Make the gap big enough */
+    if (rts > fts) {
+        diff = rts - fts;
+        if (MOF(diff, count))
+            return 1;
+        needed = diff * count;
+        if (needed > (size_t) (b->c - b->g) && grow_gap(b, needed))
+            return 1;
+    }
+
+    /* Exchange cursor and mark if mark is first */
+    if (b->m < ci_orig) {
+        while (b->g != b->a + b->m)
+            LCH_NO_R(b);
+        b->m = ci_orig;
+        /* Swap row numbers */
+        r_tmp = b->mr;
+        b->mr = b->r;
+        b->r = r_tmp;
+    }
+    /*
+     * A mark pointer must be used instead of the mark index,
+     * as large replace would spuriously put the new cursor index infront of the
+     * mark index (before the other replaces have completed).
+     * The gap is added back to make the mark pointer. Please note
+     * that at this point, the gap will be large enough to make the
+     * needed replacements, so the mark pointer will not change.
+     */
+    m_pointer = b->a + (b->c - b->g) + b->m;    /* Add back the gap */
+    /* Find and replace */
+    while (count--) {
+        q = memmatch(b->c, m_pointer - b->c, find_text, fts, bad);
+        while (b->c != q)
+            RCH(b);
+        delete_char(b, fts);
+        memcpy(b->g, replace_text, rts);
+        b->g += rts;
+    }
+
+    /* Adjustment for inserted newlines */
+    b->r += count * nl_count;
+
+    set_col_index(b);
+
     return 0;
 }
 

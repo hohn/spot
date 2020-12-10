@@ -69,7 +69,10 @@
     x = g->w; \
 } while (0)
 
-/* Evaluates ch more than once */
+/*
+ * Prints a character to the virtual screen.
+ * Evaluates ch more than once.
+ */
 #define PRINT_CH(g, ch, ret) do { \
     if (g->v < g->sa) { \
         if (isgraph((unsigned char) ch) || ch == ' ') { \
@@ -81,12 +84,99 @@
         } else if (ch == '\t') { \
             memset(g->ns + g->v, ' ', TABSIZE); \
             g->v += TABSIZE; \
-        } else if ((unsigned char) ch >= 1 && (unsigned char) ch <= 26) { \
-            *(g->ns + g->v++) = '^'; \
-            *(g->ns + g->v++) = 'A' + (unsigned char) ch - 1; \
-        } else if (ch == '\0') { \
-            *(g->ns + g->v++) = '\\'; \
-            *(g->ns + g->v++) = '0'; \
+        } else if ((unsigned char) ch <= 26) { \
+        	switch (ch) { \
+            case '\0': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = '0'; \
+                break; \
+            case '\a': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'a'; \
+                break; \
+            case '\b': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'b'; \
+                break; \
+            case '\f': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'f'; \
+                break; \
+            case '\r': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'r'; \
+                break; \
+            case '\v': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'v'; \
+                break; \
+            default: \
+                *(g->ns + g->v++) = '^'; \
+                *(g->ns + g->v++) = 'A' + (unsigned char) ch - 1; \
+                break; \
+            } \
+        } else { \
+            *(g->ns + g->v++) = (unsigned char) ch / 16 < 10 \
+                ? (unsigned char) ch / 16 + '0' \
+                : (unsigned char) ch / 16 - 10 + 'A'; \
+            *(g->ns + g->v++) = (unsigned char) ch % 16 < 10 \
+                ? (unsigned char) ch % 16 + '0' \
+                : (unsigned char) ch % 16 - 10 + 'A'; \
+        } \
+        ret = 0; \
+    } else { \
+        ret = 1; \
+    } \
+} while (0)
+
+/*
+ * Prints a character to the virtual screen.
+ * Evaluates ch more than once. This version
+ * prints newlines as \n and tabs as \t.
+ */
+#define PRINT_CH_NO_NL_TAB(g, ch, ret) do { \
+    if (g->v < g->sa) { \
+        if (isgraph((unsigned char) ch) || ch == ' ') { \
+            *(g->ns + g->v++) = ch; \
+        } else if ((unsigned char) ch <= 26) { \
+        	switch (ch) { \
+            case '\0': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = '0'; \
+                break; \
+            case '\a': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'a'; \
+                break; \
+            case '\b': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'b'; \
+                break; \
+            case '\f': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'f'; \
+                break; \
+            case '\n': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'n'; \
+                break; \
+            case '\r': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'r'; \
+                break; \
+            case '\t': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 't'; \
+                break; \
+            case '\v': \
+                *(g->ns + g->v++) = '\\'; \
+                *(g->ns + g->v++) = 'v'; \
+                break; \
+            default: \
+                *(g->ns + g->v++) = '^'; \
+                *(g->ns + g->v++) = 'A' + (unsigned char) ch - 1; \
+                break; \
+            } \
         } else { \
             *(g->ns + g->v++) = (unsigned char) ch / 16 < 10 \
                 ? (unsigned char) ch / 16 + '0' \

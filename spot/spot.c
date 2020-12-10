@@ -79,7 +79,7 @@
 /* Quote hex */
 #define INSERTHEX C('q')
 /* Change paste memory (a to z) */
-#define CHANGEPASTE C('c')
+#define CHANGEPASTE C('z')
 
 /*
  * Cx prefix
@@ -104,6 +104,8 @@
 #define STARTBUF '<'
 #define ENDBUF '>'
 #define MATCHBRACE 'm'
+/* Insert C escape sequence */
+#define CESCSEQ '\\'
 
 /* Default number of spare text buffer pointers. Must be at least 1 */
 #define SPARETB 10
@@ -137,6 +139,45 @@ int insert_hex(struct buffer *b, size_t mult)
         }
     }
     return insert_char(b, *hex * 16 + *(hex + 1), mult);
+}
+
+int insert_c_esc_seq(struct buffer *b, size_t mult)
+{
+    /*
+     * Inserts a C escape sequence from the keyboard.
+     * Do not type the backslash prefix.
+     */
+    char val;
+    int key = GETCH();
+    switch (key) {
+    case '0':
+        val = '\0';
+        break;
+    case 'a':
+        val = '\a';
+        break;
+    case 'b':
+        val = '\b';
+        break;
+    case 'f':
+        val = '\f';
+        break;
+    case 'n':
+        val = '\n';
+        break;
+    case 'r':
+        val = '\r';
+        break;
+    case 't':
+        val = '\t';
+        break;
+    case 'v':
+        val = '\v';
+        break;
+    default:
+        return 1;
+    }
+    return insert_char(b, val, mult);
 }
 
 struct tb *init_tb(size_t req)
@@ -382,7 +423,7 @@ int draw_screen(struct graph *g, struct buffer *b, struct mem *sb,
     r = 0;
     while (!r && q != cl->g) {
         ch = *q++;
-        PRINT_CH(g, ch, r);
+        PRINT_CH_NO_NL_TAB(g, ch, r);
     }
     /* Cursor is off the screen */
     if (r) {
@@ -399,7 +440,7 @@ int draw_screen(struct graph *g, struct buffer *b, struct mem *sb,
     r = 0;
     while (!r && q <= cl->e) {
         ch = *q++;
-        PRINT_CH(g, ch, r);
+        PRINT_CH_NO_NL_TAB(g, ch, r);
     }
 
     /* Position the cursor in its final location */
@@ -588,6 +629,9 @@ int main(int argc, char **argv)
                 goto top;
             case MATCHBRACE:
                 cr = match_brace(cb);
+                goto top;
+            case CESCSEQ:
+                cr = insert_c_esc_seq(cb, mult);
                 goto top;
             case COPY:
                 cr = copy_region(cb, *(p + ap), 0);
@@ -785,7 +829,7 @@ int main(int argc, char **argv)
                     goto top;
                 }
                 if (se->u > 1) {
-                    set_bad(bad, se);
+                    set_bad(bad, se->p, se->u);
                 }
                 cr = search(*(z->z + z->a), se, bad);
                 goto top;
@@ -794,7 +838,7 @@ int main(int argc, char **argv)
                     cr = 1;
                     goto top;
                 }
-                /* cr = replace(*(z->z + z->a), rp); */
+                cr = replace(*(z->z + z->a), rp);
                 goto top;
             case 'I':
                 if (buffer_to_str(cl, &cl_str)) {
