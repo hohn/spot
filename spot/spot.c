@@ -106,6 +106,8 @@
 #define MATCHBRACE 'm'
 /* Insert C escape sequence */
 #define CESCSEQ '\\'
+#define UPPERWORD 'u'
+#define LOWERWORD 'l'
 
 /* Default number of spare text buffer pointers. Must be at least 1 */
 #define SPARETB 10
@@ -632,6 +634,12 @@ int main(int argc, char **argv)
                 goto top;
             case CESCSEQ:
                 cr = insert_c_esc_seq(cb, mult);
+                goto top;
+            case UPPERWORD:
+                uppercase_word(cb, mult);
+                goto top;
+            case LOWERWORD:
+                lowercase_word(cb, mult);
                 goto top;
             case COPY:
                 cr = copy_region(cb, *(p + ap), 0);

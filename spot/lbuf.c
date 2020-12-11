@@ -156,6 +156,54 @@ void end_of_line(struct buffer *b)
     set_col_index(b);
 }
 
+void uppercase_word(struct buffer *b, size_t mult)
+{
+    /*
+     * Converts up to mult words to uppercase, but will stop
+     * if end of buffer is reached, and will not report an
+     * error if fewer than mult words are processed.
+     */
+    while (mult--) {
+        /* Eat characters up to the first alpha character */
+        while (!isalpha((unsigned char) *b->c) && b->c != b->e)
+            RCH(b);
+
+        /* Convert lowercase to uppercase while alphanumerical */
+        while (isalnum((unsigned char) *b->c) && b->c != b->e) {
+            if (islower((unsigned char) *b->c))
+                *b->c = 'A' + *b->c - 'a';
+            RCH(b);
+        }
+        /* Stop if at end of buffer */
+        if (b->c == b->e)
+            break;
+    }
+}
+
+void lowercase_word(struct buffer *b, size_t mult)
+{
+    /*
+     * Converts up to mult words to lowercase, but will stop
+     * if end of buffer is reached, and will not report an
+     * error if fewer than mult words are processed.
+     */
+    while (mult--) {
+        /* Eat characters up to the first alpha character */
+        while (!isalpha((unsigned char) *b->c) && b->c != b->e)
+            RCH(b);
+
+        /* Convert uppercase to lowercase while alphanumerical */
+        while (isalnum((unsigned char) *b->c) && b->c != b->e) {
+            if (isupper((unsigned char) *b->c))
+                *b->c = 'a' + *b->c - 'A';
+            RCH(b);
+        }
+        /* Stop if at end of buffer */
+        if (b->c == b->e)
+            break;
+    }
+}
+
 int up_line(struct buffer *b, size_t mult)
 {
     /* Moves the cursor up mult lines */
@@ -461,6 +509,7 @@ int replace(struct buffer *b, struct mem *rp)
     size_t count = 0;           /* Number of matches */
     size_t diff;
     size_t needed;              /* Gap needed */
+    size_t i;
 
     /* Mark not set */
     if (!b->m_set)
@@ -552,7 +601,8 @@ int replace(struct buffer *b, struct mem *rp)
      */
     m_pointer = b->a + (b->c - b->g) + b->m;    /* Add back the gap */
     /* Find and replace */
-    while (count--) {
+    i = count;
+    while (i--) {
         q = memmatch(b->c, m_pointer - b->c, find_text, fts, bad);
         while (b->c != q)
             RCH(b);

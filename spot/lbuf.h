@@ -104,6 +104,8 @@ void start_of_buffer(struct buffer *b);
 void end_of_buffer(struct buffer *b);
 void start_of_line(struct buffer *b);
 void end_of_line(struct buffer *b);
+void uppercase_word(struct buffer *b, size_t mult);
+void lowercase_word(struct buffer *b, size_t mult);
 size_t col_index(struct buffer *b);
 int up_line(struct buffer *b, size_t mult);
 int down_line(struct buffer *b, size_t mult);
