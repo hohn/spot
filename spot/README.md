@@ -51,8 +51,8 @@ Usually `Ctrl-Spacebar` is equivalent to `^@`.
 ^U n ^D     Delete
 ^U n ^H     backspace
 ^U n ^Y     Yank (paste)
-^U n ^Q 0a  Quote (insert) two digit hex value
-^U n ^[\ t  insert C escape sequence
+^U n ^Q 0a  Quote (insert) two digit hex value (example is newline)
+^U n ^[\ t  insert C escape sequence (example is tab)
 ^U n ^[u    Uppercase word
 ^U n ^[l    Lowercase word
      ^@     set mark
@@ -80,6 +80,36 @@ Usually `Ctrl-Spacebar` is equivalent to `^@`.
      ^[<    start of buffer
      ^[>    end of buffer
      ^[m    Match brace
+```
+
+Status bar
+----------
+
+The status bar always shows the buffer name, the row number and column index
+(in brackets), and the active paste buffer (could be one of `a` to `z`).
+
+```
+   README.md (1, 0) a
+   ^          ^  ^  ^
+   |          |  |  |
+Buffer name   |  |  +-- Paste buffer is a
+              |  |
+              |  +--- Column index (starts at 0)
+              |
+            Row number (starts at 1)
+```
+It also shows an exclamation mark if the last command failed, an asterisk
+if the buffer has been modified, and a letter `m` if the mark is currently set
+(there is a region between the mark and the cursor).
+
+```
+!* README.md (92, 3) am
+^^                    ^
+||                    |
+||                    +-- Mark is set
+|+-- Modified buffer
+|
+Last command failed
 ```
 
 Enjoy,
