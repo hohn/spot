@@ -82,7 +82,7 @@ Usually `Ctrl-Spacebar` is equivalent to `^@`.
      ^[m    Match brace
 ```
 
-Status bar
+Status Bar
 ----------
 
 The status bar always shows the buffer name, the row number and column index
