@@ -25,11 +25,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAXARGS 9
+/* Index 0 is the macro name, indices 1 to 9 are macro arguments */
+#define MAXARGS 10
 
 #define GROWTH 2
 #define LARGEGAP 2
 #define SMALLGAP 1
+
+/* Built-in macro identifiers */
+/* The define macro */
+#define BIDEFINE 1
 
 /* ASCII test for unsigned input */
 #define ISASCII(u) ((u) <= 127)
@@ -68,6 +73,7 @@ struct mdef {
     struct mdef *prev;          /* Previous node (first node is NULL) */
     struct mem name;            /* Macro name */
     struct mem text;            /* Macro replacement text */
+    int built_in;               /* Built-in macro identifier */
     struct mdef *next;          /* Next node (last node is NULL) */
 };
 
@@ -113,6 +119,7 @@ struct margs {
     size_t bracket_depth;       /* For nested brackets: only unquoted brackets are counted */
     size_t act_arg;             /* Active argument */
     struct rear_buf *args[MAXARGS];     /* Storage of the collected arguments before substitution */
+    int built_in;               /* Built-in macro identifier */
     struct margs *next;         /* Next node (last is NULL) */
 };
 
@@ -178,6 +185,7 @@ struct mdef *create_mdef_node(void)
     md->name.s = 0;
     md->text.p = NULL;
     md->text.s = 0;
+    md->built_in = 0;           /* Default is 0: User defined macro */
     md->next = NULL;
     return md;
 }
@@ -185,8 +193,8 @@ struct mdef *create_mdef_node(void)
 int stack_on_mdef(struct mdef **md)
 {
     /*
-     * Add a new macro definition node to the end of the macro definition
-     * doubly linked list.
+     * Add a new macro definition node to top of the macro definition
+     * doubly linked list (becomes the new head).
      */
     struct mdef *t;
     if ((t = create_mdef_node()) == NULL)
@@ -218,7 +226,7 @@ int mem_to_mem_cpy(struct mem *dest, struct mem *source)
 
 int rear_buf_mem_cmp(struct rear_buf *rb, struct mem *m)
 {
-    /* Compares the text of a rear buffer to a byte string */
+    /* Compares the text of a rear buffer to a mem byte string */
     size_t ts, i;
     /* Nothing to compare */
     if (rb == NULL || m == NULL || rb->p == NULL || m->p == NULL)
@@ -248,18 +256,22 @@ int rear_buf_char_cmp(struct rear_buf *rb, char ch)
     return 0;
 }
 
-struct mem *token_search(struct mdef *md, struct rear_buf *token)
+struct mem *token_search(struct mdef *md, struct rear_buf *token, int *bi)
 {
     /*
      * Searches for a token in the macro names of the macro definition doubly
      * linked list. If found it returns the replacement text (before the
-     * arguments are substituted), else it returns NULL.
+     * arguments are substituted), else it returns NULL. It also sets bi
+     * if a match is found, which is the built-in identifier (user defined
+     * macros have a built-in identifier of zero).
      */
     struct mdef *t = md, *next;
     while (t != NULL) {
         next = t->next;
-        if (!rear_buf_mem_cmp(token, &md->name))
+        if (!rear_buf_mem_cmp(token, &t->name)) {
+            *bi = t->built_in;
             return &t->text;
+        }
         t = next;
     }
     return NULL;
@@ -286,13 +298,49 @@ void free_mdef_linked_list(struct mdef *md)
     }
 }
 
+int print_mdef_linked_list(struct mdef *md)
+{
+    /*
+     * Prints out the entire macro definition linked list to stderr
+     * (for debugging).
+     */
+    struct mdef *t = md, *next;
+    size_t node = 0;
+
+    fprintf(stderr, "\nMacro definition linked list\n");
+    fprintf(stderr, "============================\n");
+
+    while (t != NULL) {
+        next = t->next;
+
+        fprintf(stderr, "\nNode: %lu\n", node);
+        fprintf(stderr, "Macro name: ");
+        if (t->name.p == NULL)
+            fprintf(stderr, "NULL");
+        else if (fwrite(t->name.p, 1, t->name.s, stderr) != t->name.s)
+            return 1;
+        fprintf(stderr, "\nMacro name size: %lu\n", t->name.s);
+        fprintf(stderr, "Macro text: ");
+        if (t->text.p == NULL)
+            fprintf(stderr, "NULL");
+        else if (fwrite(t->text.p, 1, t->text.s, stderr) != t->text.s)
+            return 1;
+        fprintf(stderr, "\nMacro text size: %lu\n", t->text.s);
+        fprintf(stderr, "Built-in macro identifier: %d\n", t->built_in);
+
+        ++node;
+        t = next;
+    }
+    return 0;
+}
+
 void free_margs_node(struct margs *ma)
 {
     /* Free a macro arguments node (a stack node) */
     size_t i;
     if (ma != NULL) {
         for (i = 0; i < MAXARGS; ++i) {
-            free_rear_buf(ma->args[i]);
+            free_rear_buf(*(ma->args + i));
         }
         free(ma);
     }
@@ -309,6 +357,62 @@ void free_margs_linked_list(struct margs *ma)
     }
 }
 
+void print_token(struct rear_buf *token)
+{
+    /* Prints a rear buffer to stderr, such as a token (used for debugging) */
+    size_t i = 0;
+    size_t ts = TEXTSIZE(token);
+    char ch;
+    if (!ts)
+        return;
+    for (i = 0; i < ts; ++i) {
+        ch = *(token->p + i);
+        fprintf(stderr, isgraph(ch) ? "%c" : "%02X", ch);
+    }
+    putc('\n', stderr);
+}
+
+int print_margs_linked_list(struct margs *ma)
+{
+    /* Prints the macro arguments linked list (for debugging) */
+    struct margs *t = ma, *next;
+    size_t node = 0, i, s;
+
+    fprintf(stderr, "\nMacro arguments stack linked list\n");
+    fprintf(stderr, "==================================\n");
+
+    while (t != NULL) {
+        next = t->next;
+
+        fprintf(stderr, "\nNode: %lu\n", node);
+        fprintf(stderr, "Macro text: ");
+        if (t->text.p == NULL)
+            fprintf(stderr, "NULL");
+        else if (fwrite(t->text.p, 1, t->text.s, stderr) != t->text.s)
+            return 1;
+        fprintf(stderr, "\nMacro text size: %lu\n", t->text.s);
+        fprintf(stderr, "Bracket depth: %lu\n", t->bracket_depth);
+        fprintf(stderr, "Active argument: %lu\n", t->act_arg);
+
+        for (i = 0; i < MAXARGS; ++i) {
+            fprintf(stderr, "Argument: %lu\n", i);
+            s = TEXTSIZE(*(t->args + i));
+            if (s) {
+                if (fwrite((*(t->args + i))->p, 1, s, stderr)
+                    != s)
+                    return 1;
+                putc('\n', stderr);
+            }
+        }
+
+        fprintf(stderr, "Built-in macro identifier: %d\n", t->built_in);
+
+        ++node;
+        t = next;
+    }
+    return 0;
+}
+
 struct margs *create_margs_node(void)
 {
     /*
@@ -323,12 +427,12 @@ struct margs *create_margs_node(void)
     ma->text.p = NULL;
     ma->text.s = 0;
     ma->bracket_depth = 0;
-    ma->act_arg = 0;
+    ma->act_arg = 1;            /* Ignore macro name for now, fix this later ... 0; */
     ma->next = NULL;
     for (i = 0; i < MAXARGS; ++i)
-        ma->args[i] = NULL;
+        *(ma->args + i) = NULL;
     for (i = 0; i < MAXARGS; ++i) {
-        if ((ma->args[i] = init_rear_buf(SMALLGAP)) == NULL) {
+        if ((*(ma->args + i) = init_rear_buf(SMALLGAP)) == NULL) {
             free_margs_node(ma);
             return NULL;
         }
@@ -523,6 +627,12 @@ int rear_buf_append_rear_buf(struct rear_buf *rb_dest,
                              struct rear_buf *rb_source)
 {
     /* Appends source rear buffer to the end of the destination rear buffer */
+    /* No storage */
+    if (rb_dest == NULL)
+        return 1;
+    /* Nothing to copy */
+    if (rb_source == NULL)
+        return 0;
     if (TEXTSIZE(rb_source) > rb_dest->gs
         && grow_rear_buf(rb_dest, TEXTSIZE(rb_source)))
         return 1;
@@ -592,21 +702,6 @@ int read_stdin(struct rear_buf *rb)
     return 0;
 }
 
-void print_token(struct rear_buf *token)
-{
-    /* This function is just for testing */
-    size_t i = 0;
-    size_t ts = TEXTSIZE(token);
-    char ch;
-    if (!ts)
-        return;
-    for (i = 0; i < ts; ++i) {
-        ch = *(token->p + i);
-        printf(isgraph(ch) ? "%c" : "%02X", ch);
-    }
-    putchar('\n');
-}
-
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -623,11 +718,15 @@ int main(int argc, char **argv)
     struct margs *ma = NULL;    /* Stack */
     struct mdef *md = NULL;     /* Macro definitions */
     struct mem *text_mem;
+    int bi;                     /* Built-in identifier of matched macro */
     /*
      * Result after arguments are substituted into macro definition
      * (before being pushed back into the input to be rescanned).
      */
     struct rear_buf *result;
+    size_t s;                   /* Temp size variable */
+    int last_match = 0;         /* Last token read was a macro match */
+
     int j;
 
     if (argc < 1)
@@ -711,6 +810,18 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Setup built-in macros */
+    /* The define built-in macro */
+    s = strlen("define");
+    if ((md->name.p = malloc(s)) == NULL) {
+        ret = 1;
+        goto clean_up;
+    }
+    memcpy(md->name.p, "define", s);
+    md->name.s = s;
+    md->built_in = BIDEFINE;
+
+
     while (!read_token(input, token, &end_of_input)) {
         /*
          * How m4 works
@@ -744,8 +855,12 @@ int main(int argc, char **argv)
          * At the end, diversion buffer 0 is printed to stdout.
          */
 
+        fprintf(stderr, "Token: ");
+        print_token(token);
+
         if (!rear_buf_char_cmp(token, '`')) {
             /* Turn on quote mode if off */
+            last_match = 0;
             if (!quote_on)
                 quote_on = 1;
             /* Go deeper in quote nesting (need to know when to get out again) */
@@ -755,6 +870,7 @@ int main(int argc, char **argv)
              * Turn off quote mode if exited from nested quotes
              * (the depth must be zero afterwards)
              */
+            last_match = 0;
             if (!--quote_depth)
                 quote_on = 0;
         } else if (!quote_on) {
@@ -763,21 +879,52 @@ int main(int argc, char **argv)
             if (ma != NULL && !rear_buf_char_cmp(token, ')')) {
                 /* Todo: check backet depth */
                 /* End of argument collection */
-                /* Clear out result buffer */
-                DELETEBUF(result);
 
-                /* Substitute arguments into defintion */
-                if (sub_args(result, &ma->text, ma->args)) {
-                    ret = 1;
-                    goto clean_up;
+                /* Check for built-in macros */
+                if (ma->built_in == BIDEFINE) {
+                    /* The define macro */
+
+                    /* Make a new mdef head */
+                    if (stack_on_mdef(&md)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    /* Copy the user defined macro name */
+                    s = TEXTSIZE(*(ma->args + 1));
+                    if ((md->name.p = malloc(s)) == NULL) {
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    memcpy(md->name.p, (*(ma->args + 1))->p, s);
+                    md->name.s = s;
+                    md->built_in = 0;   /* User defined */
+                    /* Copy the user defined macro replacement text */
+                    s = TEXTSIZE(*(ma->args + 2));
+                    if ((md->text.p = malloc(s)) == NULL) {
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    memcpy(md->text.p, (*(ma->args + 2))->p, s);
+                    md->text.s = s;
+
+                } else {
+                    /* Clear out result buffer */
+                    DELETEBUF(result);
+
+                    print_margs_linked_list(ma);
+
+                    /* Substitute arguments into defintion */
+                    if (sub_args(result, &ma->text, ma->args)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
+
+                    /* Push result into input */
+                    if (insert_rear_in_front_buf(input, result)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
                 }
-
-                /* Push result into input */
-                if (insert_rear_in_front_buf(input, result)) {
-                    ret = 1;
-                    goto clean_up;
-                }
-
                 /* Remove stack head */
                 delete_margs_stack_head(&ma);
 
@@ -789,8 +936,26 @@ int main(int argc, char **argv)
                     /* The active argument collection of the new stack head */
                     output = *(ma->args + ma->act_arg);
 
-            } else if ((text_mem = token_search(md, token)) != NULL) {
-                /* Look up token in macro definition doubly linked list */
+                last_match = 0;
+
+            } else if (last_match && ma != NULL
+                       && !rear_buf_char_cmp(token, '(')) {
+                /* Do nothing: eat the open bracket after a macro name */
+                last_match = 0;
+            } else if (ma != NULL && !rear_buf_char_cmp(token, ',')) {
+                /* Comma, so advance to next argument */
+                if (ma->act_arg < MAXARGS) {
+                    ++ma->act_arg;
+                } else {
+                    ret = 1;
+                    goto clean_up;
+                }
+                /* Refresh output shortcut */
+                output = *(ma->args + ma->act_arg);
+
+                last_match = 0;
+            } else if ((text_mem = token_search(md, token, &bi)) != NULL) {
+                /* MATCHED token in macro definition list */
 
                 /*
                  * Create a new stack node and copy the text.
@@ -807,15 +972,21 @@ int main(int argc, char **argv)
                     goto clean_up;
                 }
 
+                /* Copy the built-in identifier */
+                ma->built_in = bi;
+
                 /* Repoint output shortcut */
                 output = *(ma->args + ma->act_arg);
+
+                last_match = 1;
+
             } else {
                 /* Copy token to output */
                 if (rear_buf_append_rear_buf(output, token)) {
                     ret = 0;
                     goto clean_up;
                 }
-
+                last_match = 0;
             }
         } else {
             /* Quotes on, so just copy token to output */
@@ -826,10 +997,13 @@ int main(int argc, char **argv)
         }
     }
 
+
     if (fwrite((*div)->p, 1, TEXTSIZE(*div), stdout) != TEXTSIZE(*div)) {
         ret = 1;
         goto clean_up;
     }
+
+    print_mdef_linked_list(md);
 
   clean_up:
     if (!end_of_input)
