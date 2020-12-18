@@ -468,7 +468,7 @@ void delete_margs_stack_head(struct margs **ma)
     /* Empty list, nothing to do */
     if (*ma == NULL)
         return;
-    /* Store pointer to next node */
+    /* Store pointer to next node. Will be NULL if there are no more */
     t = (*ma)->next;
     /* Free head node */
     free_margs_node(*ma);
@@ -664,7 +664,7 @@ int sub_args(struct rear_buf *result, struct mem *text,
                    && isdigit((unsigned char) ch)) {
             /* Insert argument */
             if (rear_buf_append_rear_buf
-                (result, *(args + (unsigned char) ch)))
+                (result, *(args + (unsigned char) ch - '0')))
                 return 1;
             dollar_encountered = 0;
         } else {
@@ -798,11 +798,7 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
-    /* Setup stack */
-    if (stack_on_margs(&ma)) {
-        ret = 1;
-        goto clean_up;
-    }
+    /* Do not need to setup the stack, it is created on demand */
 
     /* Setup macro definition list */
     if (stack_on_mdef(&md)) {
@@ -929,13 +925,13 @@ int main(int argc, char **argv)
                 delete_margs_stack_head(&ma);
 
                 /* Repoint output shortcut */
-                if (ma == NULL)
+                if (ma == NULL) {
                     /* Set output shortcut to diversion 0 */
                     output = *div;
-                else
+                } else {
                     /* The active argument collection of the new stack head */
                     output = *(ma->args + ma->act_arg);
-
+                }
                 last_match = 0;
 
             } else if (last_match && ma != NULL
