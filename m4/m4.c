@@ -736,7 +736,8 @@ int main(int argc, char **argv)
     size_t s;                   /* Temp size variable */
     int last_match = 0;         /* Last token read was a macro match */
     int eat_whitespace = 0;     /* Eat input whitespace */
-
+    char left_quote = '`';      /* Left quote: default is backtick */
+    char right_quote = '\'';    /* Right quote: default is single quote */
     int j;
 
     if (argc < 1)
@@ -874,22 +875,32 @@ int main(int argc, char **argv)
         print_token(token);
 #endif
 
-        if (!rear_buf_char_cmp(token, '`')) {
+        if (!rear_buf_char_cmp(token, left_quote)) {
             /* TURN ON QUOTE mode if off */
             if (!quote_on)
                 quote_on = 1;
+            /* Pass through to output if a nested quote */
+            if (quote_depth && rear_buf_append_rear_buf(output, token)) {
+                ret = 0;
+                goto clean_up;
+            }
             /* Go deeper in quote nesting (need to know when to get out again) */
             ++quote_depth;
             eat_whitespace = 0;
             last_match = 0;
-        } else if (!rear_buf_char_cmp(token, '\'')) {
+        } else if (!rear_buf_char_cmp(token, right_quote)) {
             /*
              * TURN OFF QUOTE mode if exited from nested quotes
              * (the depth must be zero afterwards)
              */
-            last_match = 0;
+            /* Pass through to output if not about to exit quoting mode */
+            if (quote_depth > 1 && rear_buf_append_rear_buf(output, token)) {
+                ret = 0;
+                goto clean_up;
+            }
             if (!--quote_depth)
                 quote_on = 0;
+            last_match = 0;
         } else if (!quote_on) {
             /* QUOTES OFF */
 
