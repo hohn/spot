@@ -711,6 +711,69 @@ int read_stdin(struct rear_buf *rb)
     return 0;
 }
 
+int add_built_in_macro(struct mdef **md, char *name_str, int bi)
+{
+    /*
+     * Adds a built_in macro definition to the macro definition linked list.
+     * There is no need to check that the macro already exists as this is only
+     * called internally.
+     */
+    size_t s = strlen(name_str);
+    /*
+     * Add a new macro definition linked list head node.
+     * This could be the first node, in which case the macro definition list
+     * will commence.
+     */
+    if (stack_on_mdef(md))
+        return 1;
+
+    if (((*md)->name.p = malloc(s)) == NULL)
+        return 1;
+    memcpy((*md)->name.p, name_str, s);
+    (*md)->name.s = s;
+    (*md)->built_in = bi;
+    return 0;
+}
+
+void undefine_macro(struct mdef **md, struct rear_buf *macro_name)
+{
+    /*
+     * Searches for macro_name in the macro definition linked list,
+     * and if found, removes it.
+     */
+    struct mdef *t = *md, *next;
+    /* Case 1: Match occurs at head node */
+    if (!rear_buf_mem_cmp(macro_name, &t->name)) {
+        /* Repoint head */
+        *md = t->next;
+        /* NULL the previous of the new head */
+        (*md)->prev = NULL;
+        /* Free old head */
+        free_mdef_node(t);
+        return;
+    }
+    /*
+     * Case 2: Match occurs not at the head. In this case there is no need to
+     * reset *md as this is the head node already.
+     */
+    /* Search for the match */
+    t = t->next;
+    while (t != NULL) {
+        next = t->next;
+        if (!rear_buf_mem_cmp(macro_name, &t->name)) {
+            /* Match */
+            /* Bypass (link around t) */
+            t->prev->next = t->next;
+            if (t->next != NULL)
+                t->next->prev = t->prev;
+            /* Free cutout node */
+            free_mdef_node(t);
+            return;
+        }
+        t = next;
+    }
+}
+
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -819,22 +882,15 @@ int main(int argc, char **argv)
 
     /* Do not need to setup the stack, it is created on demand */
 
-    /* Setup macro definition list */
-    if (stack_on_mdef(&md)) {
+    /*
+     * Add the define built-in macro.
+     * This will commmence the macro definition linked list.
+     */
+    if (add_built_in_macro(&md, "define", BIDEFINE)) {
         ret = 1;
         goto clean_up;
     }
 
-    /* Setup built-in macros */
-    /* The define built-in macro */
-    s = strlen("define");
-    if ((md->name.p = malloc(s)) == NULL) {
-        ret = 1;
-        goto clean_up;
-    }
-    memcpy(md->name.p, "define", s);
-    md->name.s = s;
-    md->built_in = BIDEFINE;
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -912,8 +968,19 @@ int main(int argc, char **argv)
                 --ma->bracket_depth;
 
                 /* Check for BUILT-IN MACROS */
-                if (ma->built_in == BIDEFINE) {
-                    /* The define macro */
+
+                /*
+                 * THE define MACRO. To define a macro it must start
+                 * with a letter or an underscore.
+                 */
+                if (ma->built_in == BIDEFINE && (*(ma->args + 1))->s
+                    && (*(*(ma->args + 1))->p == '_'
+                        || (ISASCII((unsigned char) *(*(ma->args + 1))->p)
+                            && isalpha((unsigned char)
+                                       *(*(ma->args + 1))->p)))) {
+
+                    /* Undefine the macro if it is already defined */
+                    undefine_macro(&md, *(ma->args + 1));
 
                     /* Make a new mdef head */
                     if (stack_on_mdef(&md)) {
@@ -1063,8 +1130,17 @@ int main(int argc, char **argv)
                 output = *(ma->args + ma->act_arg);
                 eat_whitespace = 1;
                 last_match = 0;
-            } else if ((text_mem = token_search(md, token, &bi)) != NULL) {
-                /* MATCHED TOKEN in macro definition list */
+            } else if (token->s
+                       && (*token->p == '_'
+                           || (ISASCII((unsigned char) *token->p)
+                               && isalpha((unsigned char) *token->p)))
+                       && (text_mem =
+                           token_search(md, token, &bi)) != NULL) {
+                /*
+                 * MATCHED TOKEN in macro definition list.
+                 * All macro names must start with a letter or underscore,
+                 * so no point in searching otherwise.
+                 */
 
                 /*
                  * Create a new stack node and copy the text.
