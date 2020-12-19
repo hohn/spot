@@ -44,6 +44,8 @@ FILE *debug_fp = NULL;
 /* Built-in macro identifiers */
 /* The define macro */
 #define BIDEFINE 1
+/* The undefine macro */
+#define BIUNDEFINE 2
 
 /* ASCII test for unsigned input */
 #define ISASCII(u) ((u) <= 127)
@@ -891,6 +893,11 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Add the undefine nuilt-in macro */
+    if (add_built_in_macro(&md, "undefine", BIUNDEFINE)) {
+        ret = 1;
+        goto clean_up;
+    }
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -1005,6 +1012,20 @@ int main(int argc, char **argv)
                     memcpy(md->text.p, (*(ma->args + 2))->p, s);
                     md->text.s = s;
 
+                } else if (ma->built_in == BIUNDEFINE) {
+                    /* THE undefine MACRO */
+                    for (j = 0; j < MAXARGS; ++j) {
+                        if ((*(ma->args + j))->s
+                            && (*(*(ma->args + j))->p == '_'
+                                ||
+                                (ISASCII
+                                 ((unsigned char) *(*(ma->args + j))->p)
+                                 && isalpha((unsigned char)
+                                            *(*(ma->args + j))->p)))) {
+                            /* Undefine the macro if it is already defined */
+                            undefine_macro(&md, *(ma->args + j));
+                        }
+                    }
                 } else {
                     /* USER DEFINED MACROS */
                     /* Clear out result buffer */
@@ -1120,11 +1141,14 @@ int main(int argc, char **argv)
             } else if (ma != NULL && ma->bracket_depth == 1
                        && !rear_buf_char_cmp(token, ',')) {
                 /* COMMA, so advance to next argument */
-                if (ma->act_arg < MAXARGS) {
-                    ++ma->act_arg;
-                } else {
+                if (ma->act_arg == MAXARGS - 1) {
+                    fprintf(stderr,
+                            "Macro call has more than %d arguments\n",
+                            MAXARGS - 1);
                     ret = 1;
                     goto clean_up;
+                } else {
+                    ++ma->act_arg;
                 }
                 /* Refresh output shortcut */
                 output = *(ma->args + ma->act_arg);
