@@ -891,11 +891,14 @@ int main(int argc, char **argv)
             if (!--quote_depth)
                 quote_on = 0;
         } else if (!quote_on) {
-            /* Quotes off */
+            /* QUOTES OFF */
 
-            if (ma != NULL && !rear_buf_char_cmp(token, ')')) {
-                /* Todo: check backet depth */
+            if (ma != NULL && ma->bracket_depth == 1
+                && !rear_buf_char_cmp(token, ')')) {
                 /* END OF ARGUMENT collection */
+
+                /* Decrement unquoted backet depth to zero */
+                --ma->bracket_depth;
 
                 /* Check for BUILT-IN MACROS */
                 if (ma->built_in == BIDEFINE) {
@@ -958,12 +961,35 @@ int main(int argc, char **argv)
                 }
                 last_match = 0;
 
+            } else if (ma != NULL && ma->bracket_depth > 1
+                       && !rear_buf_char_cmp(token, ')')) {
+                /* NESTED UNQUOTED CLOSE BRACKET */
+                /* Pass through to output */
+                if (rear_buf_append_rear_buf(output, token)) {
+                    ret = 0;
+                    goto clean_up;
+                }
+                --ma->bracket_depth;
+                eat_whitespace = 1;
+
             } else if (last_match && ma != NULL
                        && !rear_buf_char_cmp(token, '(')) {
                 /* EAT THE OPEN BRACKET after a macro name */
+                /* Increment bracket depth */
+                ++ma->bracket_depth;
                 eat_whitespace = 1;
                 last_match = 0;
 
+            } else if (!last_match && ma != NULL
+                       && !rear_buf_char_cmp(token, '(')) {
+                /* NESTED UNQUOTED OPEN BRACKET */
+                /* Pass through to output */
+                if (rear_buf_append_rear_buf(output, token)) {
+                    ret = 0;
+                    goto clean_up;
+                }
+                ++ma->bracket_depth;
+                eat_whitespace = 1;
 
             } else if (last_match && ma != NULL
                        && rear_buf_char_cmp(token, '(')) {
@@ -1013,7 +1039,8 @@ int main(int argc, char **argv)
                 eat_whitespace = 1;
                 last_match = 0;
 
-            } else if (ma != NULL && !rear_buf_char_cmp(token, ',')) {
+            } else if (ma != NULL && ma->bracket_depth == 1
+                       && !rear_buf_char_cmp(token, ',')) {
                 /* COMMA, so advance to next argument */
                 if (ma->act_arg < MAXARGS) {
                     ++ma->act_arg;
