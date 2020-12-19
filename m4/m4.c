@@ -32,6 +32,15 @@
 #define LARGEGAP 2
 #define SMALLGAP 1
 
+/* For debugging */
+#define DEBUG
+
+/* File for debugging */
+#ifdef DEBUG
+#define DEBUGFILE ".m4_debug"
+FILE *debug_fp = NULL;
+#endif
+
 /* Built-in macro identifiers */
 /* The define macro */
 #define BIDEFINE 1
@@ -301,32 +310,32 @@ void free_mdef_linked_list(struct mdef *md)
 int print_mdef_linked_list(struct mdef *md)
 {
     /*
-     * Prints out the entire macro definition linked list to stderr
+     * Prints out the entire macro definition linked list to debug_fp
      * (for debugging).
      */
     struct mdef *t = md, *next;
     size_t node = 0;
 
-    fprintf(stderr, "\nMacro definition linked list\n");
-    fprintf(stderr, "============================\n");
+    fprintf(debug_fp, "\nMacro definition linked list\n");
+    fprintf(debug_fp, "============================\n");
 
     while (t != NULL) {
         next = t->next;
 
-        fprintf(stderr, "\nNode: %lu\n", node);
-        fprintf(stderr, "Macro name: ");
+        fprintf(debug_fp, "\nNode: %lu\n", node);
+        fprintf(debug_fp, "Macro name: ");
         if (t->name.p == NULL)
-            fprintf(stderr, "NULL");
-        else if (fwrite(t->name.p, 1, t->name.s, stderr) != t->name.s)
+            fprintf(debug_fp, "NULL");
+        else if (fwrite(t->name.p, 1, t->name.s, debug_fp) != t->name.s)
             return 1;
-        fprintf(stderr, "\nMacro name size: %lu\n", t->name.s);
-        fprintf(stderr, "Macro text: ");
+        fprintf(debug_fp, "\nMacro name size: %lu\n", t->name.s);
+        fprintf(debug_fp, "Macro text: ");
         if (t->text.p == NULL)
-            fprintf(stderr, "NULL");
-        else if (fwrite(t->text.p, 1, t->text.s, stderr) != t->text.s)
+            fprintf(debug_fp, "NULL");
+        else if (fwrite(t->text.p, 1, t->text.s, debug_fp) != t->text.s)
             return 1;
-        fprintf(stderr, "\nMacro text size: %lu\n", t->text.s);
-        fprintf(stderr, "Built-in macro identifier: %d\n", t->built_in);
+        fprintf(debug_fp, "\nMacro text size: %lu\n", t->text.s);
+        fprintf(debug_fp, "Built-in macro identifier: %d\n", t->built_in);
 
         ++node;
         t = next;
@@ -359,7 +368,7 @@ void free_margs_linked_list(struct margs *ma)
 
 void print_token(struct rear_buf *token)
 {
-    /* Prints a rear buffer to stderr, such as a token (used for debugging) */
+    /* Prints a rear buffer to debug_fp, such as a token (used for debugging) */
     size_t i = 0;
     size_t ts = TEXTSIZE(token);
     char ch;
@@ -367,9 +376,9 @@ void print_token(struct rear_buf *token)
         return;
     for (i = 0; i < ts; ++i) {
         ch = *(token->p + i);
-        fprintf(stderr, isgraph(ch) ? "%c" : "%02X", ch);
+        fprintf(debug_fp, isgraph(ch) ? "%c" : "%02X", ch);
     }
-    putc('\n', stderr);
+    putc('\n', debug_fp);
 }
 
 int print_margs_linked_list(struct margs *ma)
@@ -378,34 +387,34 @@ int print_margs_linked_list(struct margs *ma)
     struct margs *t = ma, *next;
     size_t node = 0, i, s;
 
-    fprintf(stderr, "\nMacro arguments stack linked list\n");
-    fprintf(stderr, "==================================\n");
+    fprintf(debug_fp, "\nMacro arguments stack linked list\n");
+    fprintf(debug_fp, "==================================\n");
 
     while (t != NULL) {
         next = t->next;
 
-        fprintf(stderr, "\nNode: %lu\n", node);
-        fprintf(stderr, "Macro text: ");
+        fprintf(debug_fp, "\nNode: %lu\n", node);
+        fprintf(debug_fp, "Macro text: ");
         if (t->text.p == NULL)
-            fprintf(stderr, "NULL");
-        else if (fwrite(t->text.p, 1, t->text.s, stderr) != t->text.s)
+            fprintf(debug_fp, "NULL");
+        else if (fwrite(t->text.p, 1, t->text.s, debug_fp) != t->text.s)
             return 1;
-        fprintf(stderr, "\nMacro text size: %lu\n", t->text.s);
-        fprintf(stderr, "Bracket depth: %lu\n", t->bracket_depth);
-        fprintf(stderr, "Active argument: %lu\n", t->act_arg);
+        fprintf(debug_fp, "\nMacro text size: %lu\n", t->text.s);
+        fprintf(debug_fp, "Bracket depth: %lu\n", t->bracket_depth);
+        fprintf(debug_fp, "Active argument: %lu\n", t->act_arg);
 
         for (i = 0; i < MAXARGS; ++i) {
-            fprintf(stderr, "Argument: %lu\n", i);
+            fprintf(debug_fp, "Argument: %lu\n", i);
             s = TEXTSIZE(*(t->args + i));
             if (s) {
-                if (fwrite((*(t->args + i))->p, 1, s, stderr)
+                if (fwrite((*(t->args + i))->p, 1, s, debug_fp)
                     != s)
                     return 1;
-                putc('\n', stderr);
+                putc('\n', debug_fp);
             }
         }
 
-        fprintf(stderr, "Built-in macro identifier: %d\n", t->built_in);
+        fprintf(debug_fp, "Built-in macro identifier: %d\n", t->built_in);
 
         ++node;
         t = next;
@@ -726,6 +735,7 @@ int main(int argc, char **argv)
     struct rear_buf *result;
     size_t s;                   /* Temp size variable */
     int last_match = 0;         /* Last token read was a macro match */
+    int eat_whitespace = 0;     /* Eat input whitespace */
 
     int j;
 
@@ -770,6 +780,14 @@ int main(int argc, char **argv)
             }
         }
     }
+
+#ifdef DEBUG
+    /* Open debugging file */
+    if ((debug_fp = fopen(DEBUGFILE, "wb")) == NULL) {
+        ret = 1;
+        goto clean_up;
+    }
+#endif
 
     /* Setup diversion output buffers */
     for (j = 0; j < 10; ++j) {
@@ -817,7 +835,7 @@ int main(int argc, char **argv)
     md->name.s = s;
     md->built_in = BIDEFINE;
 
-
+    /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
         /*
          * How m4 works
@@ -851,19 +869,22 @@ int main(int argc, char **argv)
          * At the end, diversion buffer 0 is printed to stdout.
          */
 
-        fprintf(stderr, "Token: ");
+#ifdef DEBUG
+        fprintf(debug_fp, "Token: ");
         print_token(token);
+#endif
 
         if (!rear_buf_char_cmp(token, '`')) {
-            /* Turn on quote mode if off */
-            last_match = 0;
+            /* TURN ON QUOTE mode if off */
             if (!quote_on)
                 quote_on = 1;
             /* Go deeper in quote nesting (need to know when to get out again) */
             ++quote_depth;
+            eat_whitespace = 0;
+            last_match = 0;
         } else if (!rear_buf_char_cmp(token, '\'')) {
             /*
-             * Turn off quote mode if exited from nested quotes
+             * TURN OFF QUOTE mode if exited from nested quotes
              * (the depth must be zero afterwards)
              */
             last_match = 0;
@@ -874,9 +895,9 @@ int main(int argc, char **argv)
 
             if (ma != NULL && !rear_buf_char_cmp(token, ')')) {
                 /* Todo: check backet depth */
-                /* End of argument collection */
+                /* END OF ARGUMENT collection */
 
-                /* Check for built-in macros */
+                /* Check for BUILT-IN MACROS */
                 if (ma->built_in == BIDEFINE) {
                     /* The define macro */
 
@@ -904,10 +925,13 @@ int main(int argc, char **argv)
                     md->text.s = s;
 
                 } else {
+                    /* USER DEFINED MACROS */
                     /* Clear out result buffer */
                     DELETEBUF(result);
 
+#ifdef DEBUG
                     print_margs_linked_list(ma);
+#endif
 
                     /* Substitute arguments into defintion */
                     if (sub_args(result, &ma->text, ma->args)) {
@@ -936,10 +960,61 @@ int main(int argc, char **argv)
 
             } else if (last_match && ma != NULL
                        && !rear_buf_char_cmp(token, '(')) {
-                /* Do nothing: eat the open bracket after a macro name */
+                /* EAT THE OPEN BRACKET after a macro name */
+                eat_whitespace = 1;
                 last_match = 0;
+
+
+            } else if (last_match && ma != NULL
+                       && rear_buf_char_cmp(token, '(')) {
+                /* Macro called with NO BRACKETS (no arguments) */
+
+                /* Put the token back on the input */
+                if (insert_rear_in_front_buf(input, token)) {
+                    ret = 1;
+                    goto clean_up;
+                }
+
+                /* Clear out result buffer */
+                DELETEBUF(result);
+
+#ifdef DEBUG
+                print_margs_linked_list(ma);
+#endif
+
+                /*
+                 * Substitute arguments into definition.
+                 * No arguments have been collected, but this is still
+                 * useful as it removes the argument substitution placeholders
+                 * ($1 $2... etc) from the definition text.
+                 */
+                if (sub_args(result, &ma->text, ma->args)) {
+                    ret = 1;
+                    goto clean_up;
+                }
+
+                /* Push result into input */
+                if (insert_rear_in_front_buf(input, result)) {
+                    ret = 1;
+                    goto clean_up;
+                }
+
+                /* Remove stack head */
+                delete_margs_stack_head(&ma);
+
+                /* Repoint output shortcut */
+                if (ma == NULL) {
+                    /* Set output shortcut to diversion 0 */
+                    output = *div;
+                } else {
+                    /* The active argument collection of the new stack head */
+                    output = *(ma->args + ma->act_arg);
+                }
+                eat_whitespace = 1;
+                last_match = 0;
+
             } else if (ma != NULL && !rear_buf_char_cmp(token, ',')) {
-                /* Comma, so advance to next argument */
+                /* COMMA, so advance to next argument */
                 if (ma->act_arg < MAXARGS) {
                     ++ma->act_arg;
                 } else {
@@ -948,10 +1023,10 @@ int main(int argc, char **argv)
                 }
                 /* Refresh output shortcut */
                 output = *(ma->args + ma->act_arg);
-
+                eat_whitespace = 1;
                 last_match = 0;
             } else if ((text_mem = token_search(md, token, &bi)) != NULL) {
-                /* MATCHED token in macro definition list */
+                /* MATCHED TOKEN in macro definition list */
 
                 /*
                  * Create a new stack node and copy the text.
@@ -977,15 +1052,24 @@ int main(int argc, char **argv)
                 last_match = 1;
 
             } else {
-                /* Copy token to output */
-                if (rear_buf_append_rear_buf(output, token)) {
-                    ret = 0;
-                    goto clean_up;
+                /* EAT WHITESPACE */
+                if (eat_whitespace && (!rear_buf_char_cmp(token, ' ')
+                                       || !rear_buf_char_cmp(token, '\t')
+                                       || !rear_buf_char_cmp(token, '\n')
+                                       || !rear_buf_char_cmp(token, '\r'))) {
+                    /* Do nothing */
+                } else {
+                    eat_whitespace = 0;
+                    /* Copy TOKEN TO OUTPUT */
+                    if (rear_buf_append_rear_buf(output, token)) {
+                        ret = 0;
+                        goto clean_up;
+                    }
                 }
                 last_match = 0;
             }
         } else {
-            /* Quotes on, so just copy token to output */
+            /* Quotes on, so just copy TOKEN TO OUTPUT */
             if (rear_buf_append_rear_buf(output, token)) {
                 ret = 0;
                 goto clean_up;
@@ -993,15 +1077,21 @@ int main(int argc, char **argv)
         }
     }
 
-
     if (fwrite((*div)->p, 1, TEXTSIZE(*div), stdout) != TEXTSIZE(*div)) {
         ret = 1;
         goto clean_up;
     }
-
+#ifdef DEBUG
     print_mdef_linked_list(md);
+#endif
+
 
   clean_up:
+#ifdef DEBUG
+    if (fclose(debug_fp))
+        ret = 1;
+#endif
+
     if (!end_of_input)
         ret = 1;
     free_front_buf(input);
