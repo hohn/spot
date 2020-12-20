@@ -71,6 +71,14 @@ FILE *debug_fp = NULL;
 } while (0)
 
 /*
+ * Test to see if the first char of a rear buffer is an alpha char
+ * or an underscore. Useful for avoiding expensive functions calls
+ * that require a valid macro name.
+ */
+#define AU(rb) ((rb)->s && (*(rb)->p == '_' || (ISASCII((unsigned char) *(rb)->p) \
+    && isalpha((unsigned char) *(rb)->p))))
+
+/*
  * A memory struct, also called a byte string.
  * This is used instead of strings as it can handle '\0' characters.
  */
@@ -980,11 +988,7 @@ int main(int argc, char **argv)
                  * THE define MACRO. To define a macro it must start
                  * with a letter or an underscore.
                  */
-                if (ma->built_in == BIDEFINE && (*(ma->args + 1))->s
-                    && (*(*(ma->args + 1))->p == '_'
-                        || (ISASCII((unsigned char) *(*(ma->args + 1))->p)
-                            && isalpha((unsigned char)
-                                       *(*(ma->args + 1))->p)))) {
+                if (ma->built_in == BIDEFINE && AU(*(ma->args + 1))) {
 
                     /* Undefine the macro if it is already defined */
                     undefine_macro(&md, *(ma->args + 1));
@@ -1015,13 +1019,7 @@ int main(int argc, char **argv)
                 } else if (ma->built_in == BIUNDEFINE) {
                     /* THE undefine MACRO */
                     for (j = 0; j < MAXARGS; ++j) {
-                        if ((*(ma->args + j))->s
-                            && (*(*(ma->args + j))->p == '_'
-                                ||
-                                (ISASCII
-                                 ((unsigned char) *(*(ma->args + j))->p)
-                                 && isalpha((unsigned char)
-                                            *(*(ma->args + j))->p)))) {
+                        if (AU(*(ma->args + j))) {
                             /* Undefine the macro if it is already defined */
                             undefine_macro(&md, *(ma->args + j));
                         }
@@ -1154,10 +1152,7 @@ int main(int argc, char **argv)
                 output = *(ma->args + ma->act_arg);
                 eat_whitespace = 1;
                 last_match = 0;
-            } else if (token->s
-                       && (*token->p == '_'
-                           || (ISASCII((unsigned char) *token->p)
-                               && isalpha((unsigned char) *token->p)))
+            } else if (AU(token)
                        && (text_mem =
                            token_search(md, token, &bi)) != NULL) {
                 /*
