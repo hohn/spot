@@ -27,6 +27,10 @@
 
 /* Index 0 is the macro name, indices 1 to 9 are macro arguments */
 #define MAXARGS 10
+/* Number of positive diversions (0 to 9) */
+#define NUMPOSDIVS 10
+/* Number of diversions (0 to 9 and -1) */
+#define NUMDIVS 11
 
 #define GROWTH 2
 #define LARGEGAP 2
@@ -41,14 +45,17 @@
 FILE *debug_fp = NULL;
 #endif
 
-/* Built-in macro identifiers */
+/* Built-in macro identifiers (user defined macros are use 0) */
 /* The define macro */
-#define BIDEFINE 1
+#define BI_DEFINE 1
 /* The undefine macro */
-#define BIUNDEFINE 2
-
-/* ASCII test for unsigned input */
-#define ISASCII(u) ((u) <= 127)
+#define BI_UNDEFINE 2
+/* The divert macro */
+#define BI_DIVERT 3
+/* The undivert macro */
+#define BI_UNDIVERT 4
+/* The divnum macro */
+#define BI_DIVNUM 5
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
@@ -75,8 +82,7 @@ FILE *debug_fp = NULL;
  * or an underscore. Useful for avoiding expensive functions calls
  * that require a valid macro name.
  */
-#define AU(rb) ((rb)->s && (*(rb)->p == '_' || (ISASCII((unsigned char) *(rb)->p) \
-    && isalpha((unsigned char) *(rb)->p))))
+#define AU(rb) ((rb)->s && (*(rb)->p == '_' || isalpha((unsigned char) *(rb)->p)))
 
 /*
  * A memory struct, also called a byte string.
@@ -332,19 +338,21 @@ int print_mdef_linked_list(struct mdef *md)
     while (t != NULL) {
         next = t->next;
 
-        fprintf(debug_fp, "\nNode: %lu\n", node);
+        fprintf(debug_fp, "\nNode: %lu\n", (unsigned long) node);
         fprintf(debug_fp, "Macro name: ");
         if (t->name.p == NULL)
             fprintf(debug_fp, "NULL");
         else if (fwrite(t->name.p, 1, t->name.s, debug_fp) != t->name.s)
             return 1;
-        fprintf(debug_fp, "\nMacro name size: %lu\n", t->name.s);
+        fprintf(debug_fp, "\nMacro name size: %lu\n",
+                (unsigned long) t->name.s);
         fprintf(debug_fp, "Macro text: ");
         if (t->text.p == NULL)
             fprintf(debug_fp, "NULL");
         else if (fwrite(t->text.p, 1, t->text.s, debug_fp) != t->text.s)
             return 1;
-        fprintf(debug_fp, "\nMacro text size: %lu\n", t->text.s);
+        fprintf(debug_fp, "\nMacro text size: %lu\n",
+                (unsigned long) t->text.s);
         fprintf(debug_fp, "Built-in macro identifier: %d\n", t->built_in);
 
         ++node;
@@ -403,18 +411,21 @@ int print_margs_linked_list(struct margs *ma)
     while (t != NULL) {
         next = t->next;
 
-        fprintf(debug_fp, "\nNode: %lu\n", node);
+        fprintf(debug_fp, "\nNode: %lu\n", (unsigned long) node);
         fprintf(debug_fp, "Macro text: ");
         if (t->text.p == NULL)
             fprintf(debug_fp, "NULL");
         else if (fwrite(t->text.p, 1, t->text.s, debug_fp) != t->text.s)
             return 1;
-        fprintf(debug_fp, "\nMacro text size: %lu\n", t->text.s);
-        fprintf(debug_fp, "Bracket depth: %lu\n", t->bracket_depth);
-        fprintf(debug_fp, "Active argument: %lu\n", t->act_arg);
+        fprintf(debug_fp, "\nMacro text size: %lu\n",
+                (unsigned long) t->text.s);
+        fprintf(debug_fp, "Bracket depth: %lu\n",
+                (unsigned long) t->bracket_depth);
+        fprintf(debug_fp, "Active argument: %lu\n",
+                (unsigned long) t->act_arg);
 
         for (i = 0; i < MAXARGS; ++i) {
-            fprintf(debug_fp, "Argument: %lu\n", i);
+            fprintf(debug_fp, "Argument: %lu\n", (unsigned long) i);
             s = TEXTSIZE(*(t->args + i));
             if (s) {
                 if (fwrite((*(t->args + i))->p, 1, s, debug_fp)
@@ -501,7 +512,7 @@ int filesize(char *fn, size_t * fs)
     struct stat st;
     if (stat(fn, &st))
         return 1;
-    if (!S_ISREG(st.st_mode))
+    if (!((st.st_mode & S_IFMT) == S_IFREG))
         return 1;
     if (st.st_size < 0)
         return 1;
@@ -576,16 +587,14 @@ int read_token(struct front_buf *input, struct rear_buf *token,
     --token->gs;                /* Reduce token gap */
     ++input->gs;                /* Increase input gap (deletes the read char from the input) */
 
-    if (ch == '_'
-        || (ISASCII((unsigned char) ch) && isalpha((unsigned char) ch))) {
+    if (ch == '_' || isalpha((unsigned char) ch)) {
         /* Token could be a macro name */
         while (input->gs < input->s) {
             /* Read the rest of the token */
             ch = *(input->p + input->gs);
 
             /* Stop if the end of the token */
-            if (ch != '_' && !(ISASCII((unsigned char) ch)
-                               && isalnum((unsigned char) ch)))
+            if (ch != '_' && !isalnum((unsigned char) ch))
                 break;
 
             /* Increase token buffer gap if empty */
@@ -642,6 +651,20 @@ int insert_rear_in_front_buf(struct front_buf *fb, struct rear_buf *rb)
     return 0;
 }
 
+int insert_ch_in_front_buf(struct front_buf *fb, char ch)
+{
+    /*
+     * Prepends a character into a front buffer.
+     * Used to push a char into the input.
+     */
+    if (!fb->gs)
+        if (grow_front_buf(fb, 1))
+            return 1;
+    *(fb->p + fb->gs - 1) = ch;
+    --fb->gs;
+    return 0;
+}
+
 int rear_buf_append_rear_buf(struct rear_buf *rb_dest,
                              struct rear_buf *rb_source)
 {
@@ -679,8 +702,7 @@ int sub_args(struct rear_buf *result, struct mem *text,
 
         if (ch == '$') {
             dollar_encountered = 1;
-        } else if (dollar_encountered && ISASCII((unsigned char) ch)
-                   && isdigit((unsigned char) ch)) {
+        } else if (dollar_encountered && isdigit((unsigned char) ch)) {
             /* Insert argument */
             if (rear_buf_append_rear_buf
                 (result, *(args + (unsigned char) ch - '0')))
@@ -784,6 +806,40 @@ void undefine_macro(struct mdef **md, struct rear_buf *macro_name)
     }
 }
 
+int undivert(struct rear_buf *dest, struct rear_buf *source)
+{
+    /*
+     * Appends the source diversion buffer onto the end of the destination
+     * diversion buffer, and empties the source diversion buffer.
+     * Any diversion buffer (0 to 9 and -1) can be undiverted into any
+     * diversion buffer. It does not change the active diversion index.
+     */
+    if (rear_buf_append_rear_buf(dest, source))
+        return 1;
+    DELETEBUF(source);
+    return 0;
+}
+
+int divnum_index(struct rear_buf *rb, size_t * index)
+{
+    /* Converts a divnum text to a divnum index */
+    size_t ts = TEXTSIZE(rb);
+    /* Empty divnum does not default to 0, it is invalid  */
+    if (!ts)
+        return 1;
+    /* Non-negative divnum can only be one digit long (0 to 9) */
+    if (ts == 1 && isdigit((unsigned char) *rb->p)) {
+        *index = *rb->p - '0';
+        return 0;
+    }
+    /* The only negative divnum allowed is -1 which maps to index 10 */
+    if (ts == 2 && *rb->p == '-' && *(rb->p + 1) == '1') {
+        *index = 10;            /* Used for divnum -1 */
+        return 0;
+    }
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -793,7 +849,10 @@ int main(int argc, char **argv)
     struct front_buf *input;
     struct rear_buf *token = NULL;
     struct rear_buf *output;    /* This is a shortcut to the changing output */
-    struct rear_buf *div[10];   /* The diversion output buffers 0 to 9 */
+    /* Diversion output buffers 0 to 9 and -1. Diversion -1 maps to index 10 */
+    struct rear_buf *div[NUMDIVS];
+    size_t act_div = 0;         /* Active diversion */
+    size_t tmp_index;           /* Temporary divnum index */
     int end_of_input = 0;       /* Indicates when the input is empty (like EOF) */
     int quote_on = 0;
     size_t quote_depth = 0;
@@ -811,7 +870,8 @@ int main(int argc, char **argv)
     int eat_whitespace = 0;     /* Eat input whitespace */
     char left_quote = '`';      /* Left quote: default is backtick */
     char right_quote = '\'';    /* Right quote: default is single quote */
-    int j;
+    int i;
+    size_t j;
 
     if (argc < 1)
         return 1;
@@ -838,8 +898,8 @@ int main(int argc, char **argv)
         }
         free_rear_buf(tmp);
     } else {
-        for (j = 1; j < argc; ++j) {
-            if (filesize(*(argv + j), &fs))
+        for (i = 1; i < argc; ++i) {
+            if (filesize(*(argv + i), &fs))
                 return 1;
             total_fs += fs;
         }
@@ -847,8 +907,8 @@ int main(int argc, char **argv)
             return 1;
         if ((input = init_front_buf(LARGEGAP + total_fs)) == NULL)
             return 1;
-        for (j = argc - 1; j; --j) {
-            if (insert_file(input, *(argv + j))) {
+        for (i = argc - 1; i; --i) {
+            if (insert_file(input, *(argv + i))) {
                 free_front_buf(input);
                 return 1;
             }
@@ -864,15 +924,15 @@ int main(int argc, char **argv)
 #endif
 
     /* Setup diversion output buffers */
-    for (j = 0; j < 10; ++j) {
+    for (j = 0; j < NUMDIVS; ++j) {
         if ((*(div + j) = init_rear_buf(LARGEGAP)) == NULL) {
             ret = 1;
             goto clean_up;
         }
     }
 
-    /* Set output shortcut to diversion 0 */
-    output = *div;
+    /* Set output shortcut to active diversion  */
+    output = *(div + act_div);
 
     /* Setup token buffer */
     if ((token = init_rear_buf(SMALLGAP)) == NULL) {
@@ -896,16 +956,35 @@ int main(int argc, char **argv)
      * Add the define built-in macro.
      * This will commmence the macro definition linked list.
      */
-    if (add_built_in_macro(&md, "define", BIDEFINE)) {
+    if (add_built_in_macro(&md, "define", BI_DEFINE)) {
         ret = 1;
         goto clean_up;
     }
 
     /* Add the undefine nuilt-in macro */
-    if (add_built_in_macro(&md, "undefine", BIUNDEFINE)) {
+    if (add_built_in_macro(&md, "undefine", BI_UNDEFINE)) {
         ret = 1;
         goto clean_up;
     }
+
+    /* Add the divert built-in macro */
+    if (add_built_in_macro(&md, "divert", BI_DIVERT)) {
+        ret = 1;
+        goto clean_up;
+    }
+
+    /* Add the undivert built-in macro */
+    if (add_built_in_macro(&md, "undivert", BI_UNDIVERT)) {
+        ret = 1;
+        goto clean_up;
+    }
+
+    /* Add the divnum built-in macro */
+    if (add_built_in_macro(&md, "divnum", BI_DIVNUM)) {
+        ret = 1;
+        goto clean_up;
+    }
+
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -932,13 +1011,16 @@ int main(int argc, char **argv)
          * all of the command line files).
          * However, the output is complicated. If the stack is empty, then tokens
          * are written to the active diversion buffer (by default 0, but could be
-         * any one of 0 to 9).
+         * any one of 0 to 9 or -1).
          * If the stack is being used, then the output is directed to the argument
          * being collected (could be argument 1 to 9). When an unquoted-comma is
          * encountered then the next argument will be collected.
-         * Diversion buffers 1 to 9 can be undiverted into 0
-         * (they are not scanned again).
-         * At the end, diversion buffer 0 is printed to stdout.
+         * Any diversion buffer (0 to 9 or -1) can be undiverted into the active
+         * diversion except for the active diversion itself (there is no rescanning).
+         * At the end, diversion buffers 0 to 9 are printed to stdout in order.
+         * Diversion -1 is not written to stdout automatically (this is the only
+         * thing that makes diversion -1 different), however, it can be undiverted
+         * into another diversion before the program finishes.
          */
 
 #ifdef DEBUG
@@ -988,7 +1070,7 @@ int main(int argc, char **argv)
                  * THE define MACRO. To define a macro it must start
                  * with a letter or an underscore.
                  */
-                if (ma->built_in == BIDEFINE && AU(*(ma->args + 1))) {
+                if (ma->built_in == BI_DEFINE && AU(*(ma->args + 1))) {
 
                     /* Undefine the macro if it is already defined */
                     undefine_macro(&md, *(ma->args + 1));
@@ -1016,13 +1098,46 @@ int main(int argc, char **argv)
                     memcpy(md->text.p, (*(ma->args + 2))->p, s);
                     md->text.s = s;
 
-                } else if (ma->built_in == BIUNDEFINE) {
+                } else if (ma->built_in == BI_UNDEFINE) {
                     /* THE undefine MACRO */
                     for (j = 0; j < MAXARGS; ++j) {
                         if (AU(*(ma->args + j))) {
                             /* Undefine the macro if it is already defined */
                             undefine_macro(&md, *(ma->args + j));
                         }
+                    }
+                } else if (ma->built_in == BI_DIVERT) {
+                    /* THE divert MACRO */
+                    if (divnum_index(*(ma->args + 1), &act_div)) {
+                        fprintf(stderr,
+                                "%s: divert: Invalid divnum supplied\n",
+                                *argv);
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    /* No need to refresh the output shortcut as this will happen later */
+                } else if (ma->built_in == BI_UNDIVERT) {
+                    /* THE undivert MACRO */
+                    if (divnum_index(*(ma->args + 1), &tmp_index)) {
+                        fprintf(stderr,
+                                "%s: undivert: Invalid divnum supplied\n",
+                                *argv);
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    /* Cannot undivert the active diversion into itself */
+                    if (tmp_index == act_div) {
+                        fprintf(stderr,
+                                "%s: undivert: Cannot undivert the active diversion (%d) into itself\n",
+                                *argv, act_div != 10 ? (int) act_div : -1);
+                        ret = 1;
+                        goto clean_up;
+                    }
+
+                    /* Undivert into the active diversion (does not change the active diversion index) */
+                    if (undivert(*(div + act_div), *(div + tmp_index))) {
+                        ret = 1;
+                        goto clean_up;
                     }
                 } else {
                     /* USER DEFINED MACROS */
@@ -1050,8 +1165,8 @@ int main(int argc, char **argv)
 
                 /* Repoint output shortcut */
                 if (ma == NULL) {
-                    /* Set output shortcut to diversion 0 */
-                    output = *div;
+                    /* Set output shortcut to active diversion  */
+                    output = *(div + act_div);
                 } else {
                     /* The active argument collection of the new stack head */
                     output = *(ma->args + ma->act_arg);
@@ -1091,35 +1206,58 @@ int main(int argc, char **argv)
             } else if (last_match && ma != NULL
                        && rear_buf_char_cmp(token, '(')) {
                 /* Macro called with NO BRACKETS (no arguments) */
+                /* Process built-in macro that take no arguments first */
+                if (ma->built_in == BI_DIVNUM) {
+                    /* THE divnum MACRO */
+                    if (act_div != 10) {
+                        /* Push back into input to be rescanned later */
+                        if (insert_ch_in_front_buf(input, '0' + act_div)) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    } else {
+                        /* divnum -1 is index 10 */
+                        /* Push back -1 into input to be rescanned later */
+                        if (insert_ch_in_front_buf(input, '1')) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                        if (insert_ch_in_front_buf(input, '-')) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
+                } else {
+                    /* USER DEFINED MACRO WITH NO ARGUMENT BRACKETS */
+                    /* Put the token back on the input */
+                    if (insert_rear_in_front_buf(input, token)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
 
-                /* Put the token back on the input */
-                if (insert_rear_in_front_buf(input, token)) {
-                    ret = 1;
-                    goto clean_up;
-                }
-
-                /* Clear out result buffer */
-                DELETEBUF(result);
+                    /* Clear out result buffer */
+                    DELETEBUF(result);
 
 #ifdef DEBUG
-                print_margs_linked_list(ma);
+                    print_margs_linked_list(ma);
 #endif
 
-                /*
-                 * Substitute arguments into definition.
-                 * No arguments have been collected, but this is still
-                 * useful as it removes the argument substitution placeholders
-                 * ($1 $2... etc) from the definition text.
-                 */
-                if (sub_args(result, &ma->text, ma->args)) {
-                    ret = 1;
-                    goto clean_up;
-                }
+                    /*
+                     * Substitute arguments into definition.
+                     * No arguments have been collected, but this is still
+                     * useful as it removes the argument substitution placeholders
+                     * ($1 $2... etc) from the definition text.
+                     */
+                    if (sub_args(result, &ma->text, ma->args)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
 
-                /* Push result into input */
-                if (insert_rear_in_front_buf(input, result)) {
-                    ret = 1;
-                    goto clean_up;
+                    /* Push result into input */
+                    if (insert_rear_in_front_buf(input, result)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
                 }
 
                 /* Remove stack head */
@@ -1127,8 +1265,8 @@ int main(int argc, char **argv)
 
                 /* Repoint output shortcut */
                 if (ma == NULL) {
-                    /* Set output shortcut to diversion 0 */
-                    output = *div;
+                    /* Set output shortcut to active diversion  */
+                    output = *(div + act_div);
                 } else {
                     /* The active argument collection of the new stack head */
                     output = *(ma->args + ma->act_arg);
@@ -1140,6 +1278,7 @@ int main(int argc, char **argv)
                        && !rear_buf_char_cmp(token, ',')) {
                 /* COMMA, so advance to next argument */
                 if (ma->act_arg == MAXARGS - 1) {
+                    /* Todo: Add macro name to error message */
                     fprintf(stderr,
                             "Macro call has more than %d arguments\n",
                             MAXARGS - 1);
@@ -1210,10 +1349,15 @@ int main(int argc, char **argv)
         }
     }
 
-    if (fwrite((*div)->p, 1, TEXTSIZE(*div), stdout) != TEXTSIZE(*div)) {
-        ret = 1;
-        goto clean_up;
+    /* Write diversions to stdout in ascending order (excluding diversion -1) */
+    for (j = 0; j < NUMPOSDIVS; ++j) {
+        if (fwrite((*(div + j))->p, 1, TEXTSIZE(*(div + j)), stdout) !=
+            TEXTSIZE(*(div + j))) {
+            ret = 1;
+            goto clean_up;
+        }
     }
+
 #ifdef DEBUG
     print_mdef_linked_list(md);
 #endif
