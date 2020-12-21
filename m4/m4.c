@@ -58,6 +58,8 @@ FILE *debug_fp = NULL;
 #define BI_DIVNUM 5
 /* The changequote macro */
 #define BI_CHANGEQUOTE 6
+/* The include macro */
+#define BI_INCLUDE 7
 
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -873,12 +875,14 @@ int main(int argc, char **argv)
      */
     struct rear_buf *result;
     size_t s;                   /* Temp size variable */
+    char *tmp_fn;               /* Temporary filename */
     int last_match = 0;         /* Last token read was a macro match */
     int eat_whitespace = 0;     /* Eat input whitespace */
     char left_quote = '`';      /* Left quote: default is backtick */
     char right_quote = '\'';    /* Right quote: default is single quote */
     int i;
     size_t j;
+    char *q;
 
     if (argc < 1)
         return 1;
@@ -994,6 +998,12 @@ int main(int argc, char **argv)
 
     /* Add the changequote built-in macro */
     if (add_built_in_macro(&md, "changequote", BI_CHANGEQUOTE)) {
+        ret = 1;
+        goto clean_up;
+    }
+
+    /* Add the include built-in macro */
+    if (add_built_in_macro(&md, "include", BI_INCLUDE)) {
         ret = 1;
         goto clean_up;
     }
@@ -1168,6 +1178,33 @@ int main(int argc, char **argv)
                     }
                     left_quote = *(*(ma->args + 1))->p;
                     right_quote = *(*(ma->args + 2))->p;
+
+
+                } else if (ma->built_in == BI_INCLUDE) {
+                    /* THE include MACRO */
+                    /* Convert arg 1 into the filename */
+                    s = TEXTSIZE(*(ma->args + 1));
+                    if (AOF(s, 1)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    if ((tmp_fn = malloc(s + 1)) == NULL) {
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    q = tmp_fn;
+                    /* Strip out \0 characters */
+                    for (j = 0; j < s; ++j) {
+                        if (*((*(ma->args + 1))->p + j) != '\0')
+                            *q++ = *((*(ma->args + 1))->p + j);
+                    }
+                    *q = '\0';
+                    if (insert_file(input, tmp_fn)) {
+                        free(tmp_fn);
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    free(tmp_fn);
                 } else {
                     /* USER DEFINED MACROS */
                     /* Clear out result buffer */
