@@ -56,6 +56,9 @@ FILE *debug_fp = NULL;
 #define BI_UNDIVERT 4
 /* The divnum macro */
 #define BI_DIVNUM 5
+/* The changequote macro */
+#define BI_CHANGEQUOTE 6
+
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
@@ -985,6 +988,12 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Add the changequote built-in macro */
+    if (add_built_in_macro(&md, "changequote", BI_CHANGEQUOTE)) {
+        ret = 1;
+        goto clean_up;
+    }
+
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -1139,6 +1148,22 @@ int main(int argc, char **argv)
                         ret = 1;
                         goto clean_up;
                     }
+                } else if (ma->built_in == BI_CHANGEQUOTE) {
+                    /* THE changequote MACRO */
+                    /* The quotes must be different, single, graph characters */
+                    if (TEXTSIZE(*(ma->args + 1)) != 1
+                        || TEXTSIZE(*(ma->args + 2)) != 1
+                        || !isgraph(*(*(ma->args + 1))->p)
+                        || !isgraph(*(*(ma->args + 2))->p)
+                        || *(*(ma->args + 1))->p == *(*(ma->args + 2))->p) {
+                        fprintf(stderr,
+                                "%s: changequote: Invalid arguments\n",
+                                *argv);
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    left_quote = *(*(ma->args + 1))->p;
+                    right_quote = *(*(ma->args + 2))->p;
                 } else {
                     /* USER DEFINED MACROS */
                     /* Clear out result buffer */
