@@ -369,7 +369,8 @@ void free_margs_node(struct margs *ma)
     /* Free a macro arguments node (a stack node) */
     size_t i;
     if (ma != NULL) {
-        for (i = 0; i < MAXARGS; ++i) {
+        /* Arg 0 is not allocated, so no need to free */
+        for (i = 1; i < MAXARGS; ++i) {
             free_rear_buf(*(ma->args + i));
         }
         free(ma);
@@ -427,7 +428,8 @@ int print_margs_linked_list(struct margs *ma)
         fprintf(debug_fp, "Active argument: %lu\n",
                 (unsigned long) t->act_arg);
 
-        for (i = 0; i < MAXARGS; ++i) {
+        /* Arg 0 is not allocated */
+        for (i = 1; i < MAXARGS; ++i) {
             fprintf(debug_fp, "Argument: %lu\n", (unsigned long) i);
             s = TEXTSIZE(*(t->args + i));
             if (s) {
@@ -464,7 +466,8 @@ struct margs *create_margs_node(void)
     ma->next = NULL;
     for (i = 0; i < MAXARGS; ++i)
         *(ma->args + i) = NULL;
-    for (i = 0; i < MAXARGS; ++i) {
+    /* Do not need to allocate arg 0 as it is not used */
+    for (i = 1; i < MAXARGS; ++i) {
         if ((*(ma->args + i) = init_rear_buf(SMALLGAP)) == NULL) {
             free_margs_node(ma);
             return NULL;
@@ -705,8 +708,9 @@ int sub_args(struct rear_buf *result, struct mem *text,
 
         if (ch == '$') {
             dollar_encountered = 1;
-        } else if (dollar_encountered && isdigit((unsigned char) ch)) {
-            /* Insert argument */
+        } else if (dollar_encountered && isdigit((unsigned char) ch)
+                   && ch != '0') {
+            /* Insert argument (arg 0 is not allocated) */
             if (rear_buf_append_rear_buf
                 (result, *(args + (unsigned char) ch - '0')))
                 return 1;
