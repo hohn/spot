@@ -60,6 +60,8 @@ FILE *debug_fp = NULL;
 #define BI_CHANGEQUOTE 6
 /* The include macro */
 #define BI_INCLUDE 7
+/* The dnl macro */
+#define BI_DNL 8
 
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -1008,6 +1010,12 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Add the dnl built-in macro */
+    if (add_built_in_macro(&md, "dnl", BI_DNL)) {
+        ret = 1;
+        goto clean_up;
+    }
+
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -1275,6 +1283,11 @@ int main(int argc, char **argv)
                 /* Process built-in macro that take no arguments first */
                 if (ma->built_in == BI_DIVNUM) {
                     /* THE divnum MACRO */
+                    /* Put the token back on the input */
+                    if (insert_rear_in_front_buf(input, token)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
                     if (act_div != 10) {
                         /* Push back into input to be rescanned later */
                         if (insert_ch_in_front_buf(input, '0' + act_div)) {
@@ -1292,6 +1305,20 @@ int main(int argc, char **argv)
                             ret = 1;
                             goto clean_up;
                         }
+                    }
+                } else if (ma->built_in == BI_DNL) {
+                    /* THE dnl MACRO */
+                    /* Put the token back on the input */
+                    if (insert_rear_in_front_buf(input, token)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    /* Search for newline character */
+                    if ((q =
+                         memchr(input->p + input->gs, '\n',
+                                input->s - input->gs)) != NULL) {
+                        /* Delete up to and including the newline character */
+                        input->gs = q - input->p + 1;
                     }
                 } else {
                     /* USER DEFINED MACRO WITH NO ARGUMENT BRACKETS */
@@ -1344,7 +1371,6 @@ int main(int argc, char **argv)
                        && !rear_buf_char_cmp(token, ',')) {
                 /* COMMA, so advance to next argument */
                 if (ma->act_arg == MAXARGS - 1) {
-                    /* Todo: Add macro name to error message */
                     fprintf(stderr,
                             "Macro call has more than %d arguments\n",
                             MAXARGS - 1);
