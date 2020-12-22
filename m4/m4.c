@@ -71,10 +71,6 @@ FILE *debug_fp = NULL;
 /* The esyscmd macro */
 #define BI_ESYSCMD 9
 
-#ifndef _WIN32
-#define _popen popen
-#define _pclose pclose
-#endif
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
@@ -87,7 +83,7 @@ FILE *debug_fp = NULL;
  * Appends a char to the end of a rear buffer.
  * Clear ret to zero before calling this macro.
  */
-#define RBAPPENDCH(rb, ch, ret) do { \
+#define RB_APPEND_CH(rb, ch, ret) do { \
     if (!(rb)->gs && grow_rear_buf(rb, 1)) { \
         ret = 1; \
     } else { \
@@ -735,14 +731,14 @@ int sub_args(struct rear_buf *result, struct mem *text,
             if (dollar_encountered) {
                 /* Insert a dollar sign to compensate */
                 ret = 0;
-                RBAPPENDCH(result, '$', ret);
+                RB_APPEND_CH(result, '$', ret);
                 if (ret)
                     return 1;
                 dollar_encountered = 0;
             }
             /* Insert the char */
             ret = 0;
-            RBAPPENDCH(result, ch, ret);
+            RB_APPEND_CH(result, ch, ret);
             if (ret)
                 return 1;
         }
@@ -1189,6 +1185,16 @@ int main(int argc, char **argv)
                  * with a letter or an underscore.
                  */
                 if (ma->built_in == BI_DEFINE && AU(*(ma->args + 1))) {
+                    /* define takes arg 1 and optionally arg 2 */
+                    for (j = 3; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            fprintf(stderr,
+                                    "%s: define: Invalid position of non-empty argument\n",
+                                    *argv);
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
 
                     /* Undefine the macro if it is already defined */
                     undefine_macro(&md, *(ma->args + 1));
@@ -1226,6 +1232,16 @@ int main(int argc, char **argv)
                     }
                 } else if (ma->built_in == BI_DIVERT) {
                     /* THE divert MACRO */
+                    /* divert takes arg 1 only */
+                    for (j = 2; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            fprintf(stderr,
+                                    "%s: divert: Invalid position of non-empty argument\n",
+                                    *argv);
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
                     if (divnum_index(*(ma->args + 1), &act_div)) {
                         fprintf(stderr,
                                 "%s: divert: Invalid divnum supplied\n",
@@ -1236,6 +1252,16 @@ int main(int argc, char **argv)
                     /* No need to refresh the output shortcut as this will happen later */
                 } else if (ma->built_in == BI_UNDIVERT) {
                     /* THE undivert MACRO */
+                    /* undivert takes arg 1 only */
+                    for (j = 2; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            fprintf(stderr,
+                                    "%s: undivert: Invalid position of non-empty argument\n",
+                                    *argv);
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
                     if (divnum_index(*(ma->args + 1), &tmp_index)) {
                         fprintf(stderr,
                                 "%s: undivert: Invalid divnum supplied\n",
@@ -1259,6 +1285,16 @@ int main(int argc, char **argv)
                     }
                 } else if (ma->built_in == BI_CHANGEQUOTE) {
                     /* THE changequote MACRO */
+                    /* changequote takes arg 1 and arg 2 only */
+                    for (j = 3; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            fprintf(stderr,
+                                    "%s: changequote: Invalid position of non-empty argument\n",
+                                    *argv);
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
                     /* The quotes must be different, single, graph characters */
                     if (TEXTSIZE(*(ma->args + 1)) != 1
                         || TEXTSIZE(*(ma->args + 2)) != 1
@@ -1274,9 +1310,18 @@ int main(int argc, char **argv)
                     left_quote = *(*(ma->args + 1))->p;
                     right_quote = *(*(ma->args + 2))->p;
 
-
                 } else if (ma->built_in == BI_INCLUDE) {
                     /* THE include MACRO */
+                    /* include takes arg 1 only */
+                    for (j = 2; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            fprintf(stderr,
+                                    "%s: include: Invalid position of non-empty argument\n",
+                                    *argv);
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
                     /* Convert arg 1 into the filename */
                     if ((tmp_str =
                          rear_buf_to_str(*(ma->args + 1))) == NULL) {
@@ -1291,6 +1336,16 @@ int main(int argc, char **argv)
                     free(tmp_str);
                 } else if (ma->built_in == BI_ESYSCMD) {
                     /* THE esyscmd MACRO */
+                    /* esyscmd takes arg 1 only */
+                    for (j = 2; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            fprintf(stderr,
+                                    "%s: esyscmd: Invalid position of non-empty argument\n",
+                                    *argv);
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
                     /* Convert arg 1 into the shell command string */
                     if ((tmp_str =
                          rear_buf_to_str(*(ma->args + 1))) == NULL) {
