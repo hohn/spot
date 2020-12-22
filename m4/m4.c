@@ -70,6 +70,8 @@ FILE *debug_fp = NULL;
 #define BI_DNL 8
 /* The esyscmd macro */
 #define BI_ESYSCMD 9
+/* The ifdef macro */
+#define BI_IFDEF 10
 
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -1099,6 +1101,12 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Add the ifdef built-in macro */
+    if (add_built_in_macro(&md, "ifdef", BI_IFDEF)) {
+        ret = 1;
+        goto clean_up;
+    }
+
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -1185,7 +1193,7 @@ int main(int argc, char **argv)
                  * with a letter or an underscore.
                  */
                 if (ma->built_in == BI_DEFINE && AU(*(ma->args + 1))) {
-                    /* define takes arg 1 and optionally arg 2 */
+                    /* define cannot take any more than the first two args */
                     for (j = 3; j < MAXARGS; ++j) {
                         if (TEXTSIZE(*(ma->args + j))) {
                             fprintf(stderr,
@@ -1285,7 +1293,7 @@ int main(int argc, char **argv)
                     }
                 } else if (ma->built_in == BI_CHANGEQUOTE) {
                     /* THE changequote MACRO */
-                    /* changequote takes arg 1 and arg 2 only */
+                    /* changequote cannot take any more than the first two args */
                     for (j = 3; j < MAXARGS; ++j) {
                         if (TEXTSIZE(*(ma->args + j))) {
                             fprintf(stderr,
@@ -1366,6 +1374,46 @@ int main(int argc, char **argv)
                     if (insert_rear_in_front_buf(input, result)) {
                         ret = 1;
                         goto clean_up;
+                    }
+
+                } else if (ma->built_in == BI_IFDEF) {
+                    /* THE ifdef MACRO */
+                    /* ifdef cannot take any more than the first 3 args */
+                    for (j = 4; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            fprintf(stderr,
+                                    "%s: ifdef: Invalid position of non-empty argument\n",
+                                    *argv);
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
+                    if (!TEXTSIZE(*(ma->args + 1))) {
+                        fprintf(stderr,
+                                "%s: ifdef: first argument cannot be empty\n",
+                                *argv);
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    if (AU(*(ma->args + 1))
+                        && token_search(md, *(ma->args + 1), &bi) != NULL) {
+                        /* It is defined */
+                        /* Push arg 2 into input */
+                        if (TEXTSIZE(*(ma->args + 2))
+                            && insert_rear_in_front_buf(input,
+                                                        *(ma->args + 2))) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    } else {
+                        /* Is not defined */
+                        /* Push arg 3 into input */
+                        if (TEXTSIZE(*(ma->args + 3))
+                            && insert_rear_in_front_buf(input,
+                                                        *(ma->args + 3))) {
+                            ret = 1;
+                            goto clean_up;
+                        }
                     }
                 } else {
                     /* USER DEFINED MACROS */
