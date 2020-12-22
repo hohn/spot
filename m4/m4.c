@@ -18,7 +18,13 @@
  * m4 written from scratch
  */
 
+#include <sys/types.h>
 #include <sys/stat.h>
+
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -62,7 +68,13 @@ FILE *debug_fp = NULL;
 #define BI_INCLUDE 7
 /* The dnl macro */
 #define BI_DNL 8
+/* The esyscmd macro */
+#define BI_ESYSCMD 9
 
+#ifndef _WIN32
+#define _popen popen
+#define _pclose pclose
+#endif
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
@@ -851,6 +863,75 @@ int divnum_index(struct rear_buf *rb, size_t * index)
     return 1;
 }
 
+char *rear_buf_to_str(struct rear_buf *rb)
+{
+    /*
+     * Converts a rear buffer to a string by stripping out \0 characters.
+     * The string is dynamically allocated and needs to be freed later.
+     */
+    char *t, *q, ch;
+    size_t s, j;
+    s = TEXTSIZE(rb);
+    if (AOF(s, 1))
+        return NULL;
+    if ((t = malloc(s + 1)) == NULL)
+        return NULL;
+    q = t;
+    /* Strip out \0 characters */
+    for (j = 0; j < s; ++j) {
+        ch = *(rb->p + j);
+        if (ch != '\0')
+            *q++ = ch;
+    }
+    *q = '\0';
+    return t;
+}
+
+int sh_cmd_to_rear_buf(struct rear_buf *result, char *cmd_str)
+{
+    /*
+     * Executes a shell command and appends the result to the end of the
+     * rear buffer.
+     */
+    FILE *fp;
+    int x, status;
+
+#ifdef _WIN32
+    if ((fp = _popen(cmd_str, "rb")) == NULL)
+        return 1;
+#else
+    if ((fp = popen(cmd_str, "r")) == NULL)
+        return 1;
+#endif
+
+    /* Read the command output into a rear buffer */
+    while ((x = getc(fp)) != EOF) {
+        if (!result->gs && grow_rear_buf(result, 1))
+            return 1;
+        *(result->p + TEXTSIZE(result)) = x;
+        --result->gs;
+    }
+
+    /* Close the process */
+#ifdef _WIN32
+    if ((status = _pclose(fp)) == -1)
+        return 1;
+#else
+    if ((status = pclose(fp)) == -1)
+        return 1;
+#endif
+
+    /* Check if the shell command was successful */
+#ifdef _WIN32
+    if (!status)
+        return 0;
+#else
+    if (WIFEXITED(status) && !WEXITSTATUS(status))
+        return 0;
+#endif
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -877,7 +958,7 @@ int main(int argc, char **argv)
      */
     struct rear_buf *result;
     size_t s;                   /* Temp size variable */
-    char *tmp_fn;               /* Temporary filename */
+    char *tmp_str;              /* Temporary string */
     int last_match = 0;         /* Last token read was a macro match */
     int eat_whitespace = 0;     /* Eat input whitespace */
     char left_quote = '`';      /* Left quote: default is backtick */
@@ -1012,6 +1093,12 @@ int main(int argc, char **argv)
 
     /* Add the dnl built-in macro */
     if (add_built_in_macro(&md, "dnl", BI_DNL)) {
+        ret = 1;
+        goto clean_up;
+    }
+
+    /* Add the esyscmd built-in macro */
+    if (add_built_in_macro(&md, "esyscmd", BI_ESYSCMD)) {
         ret = 1;
         goto clean_up;
     }
@@ -1191,28 +1278,40 @@ int main(int argc, char **argv)
                 } else if (ma->built_in == BI_INCLUDE) {
                     /* THE include MACRO */
                     /* Convert arg 1 into the filename */
-                    s = TEXTSIZE(*(ma->args + 1));
-                    if (AOF(s, 1)) {
+                    if ((tmp_str =
+                         rear_buf_to_str(*(ma->args + 1))) == NULL) {
                         ret = 1;
                         goto clean_up;
                     }
-                    if ((tmp_fn = malloc(s + 1)) == NULL) {
+                    if (insert_file(input, tmp_str)) {
+                        free(tmp_str);
                         ret = 1;
                         goto clean_up;
                     }
-                    q = tmp_fn;
-                    /* Strip out \0 characters */
-                    for (j = 0; j < s; ++j) {
-                        if (*((*(ma->args + 1))->p + j) != '\0')
-                            *q++ = *((*(ma->args + 1))->p + j);
-                    }
-                    *q = '\0';
-                    if (insert_file(input, tmp_fn)) {
-                        free(tmp_fn);
+                    free(tmp_str);
+                } else if (ma->built_in == BI_ESYSCMD) {
+                    /* THE esyscmd MACRO */
+                    /* Convert arg 1 into the shell command string */
+                    if ((tmp_str =
+                         rear_buf_to_str(*(ma->args + 1))) == NULL) {
                         ret = 1;
                         goto clean_up;
                     }
-                    free(tmp_fn);
+                    DELETEBUF(result);
+                    if (sh_cmd_to_rear_buf(result, tmp_str)) {
+                        fprintf(stderr,
+                                "%s: esyscmd: shell command failed\n",
+                                *argv);
+                        free(tmp_str);
+                        ret = 1;
+                        goto clean_up;
+                    }
+                    free(tmp_str);
+                    /* Push result into input */
+                    if (insert_rear_in_front_buf(input, result)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
                 } else {
                     /* USER DEFINED MACROS */
                     /* Clear out result buffer */
