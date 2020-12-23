@@ -72,6 +72,10 @@ FILE *debug_fp = NULL;
 #define BI_ESYSCMD 9
 /* The ifdef macro */
 #define BI_IFDEF 10
+/* The ifelse macro */
+#define BI_IFELSE 11
+/* The dumpdef macro */
+#define BI_DUMPDEF 12
 
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -338,44 +342,6 @@ void free_mdef_linked_list(struct mdef *md)
         free_mdef_node(t);
         t = next;
     }
-}
-
-int print_mdef_linked_list(struct mdef *md)
-{
-    /*
-     * Prints out the entire macro definition linked list to debug_fp
-     * (for debugging).
-     */
-    struct mdef *t = md, *next;
-    size_t node = 0;
-
-    fprintf(debug_fp, "\nMacro definition linked list\n");
-    fprintf(debug_fp, "============================\n");
-
-    while (t != NULL) {
-        next = t->next;
-
-        fprintf(debug_fp, "\nNode: %lu\n", (unsigned long) node);
-        fprintf(debug_fp, "Macro name: ");
-        if (t->name.p == NULL)
-            fprintf(debug_fp, "NULL");
-        else if (fwrite(t->name.p, 1, t->name.s, debug_fp) != t->name.s)
-            return 1;
-        fprintf(debug_fp, "\nMacro name size: %lu\n",
-                (unsigned long) t->name.s);
-        fprintf(debug_fp, "Macro text: ");
-        if (t->text.p == NULL)
-            fprintf(debug_fp, "NULL");
-        else if (fwrite(t->text.p, 1, t->text.s, debug_fp) != t->text.s)
-            return 1;
-        fprintf(debug_fp, "\nMacro text size: %lu\n",
-                (unsigned long) t->text.s);
-        fprintf(debug_fp, "Built-in macro identifier: %d\n", t->built_in);
-
-        ++node;
-        t = next;
-    }
-    return 0;
 }
 
 void free_margs_node(struct margs *ma)
@@ -930,6 +896,38 @@ int sh_cmd_to_rear_buf(struct rear_buf *result, char *cmd_str)
     return 1;
 }
 
+int dumpdef_all(struct mdef *md)
+{
+    /*
+     * Prints a macro name and the corresponding replacement text to stderr.
+     * Does this for either one macro or all macros.
+     */
+    struct mdef *t = md, *next;
+    size_t node = 0;
+
+    while (t != NULL) {
+        next = t->next;
+
+        if (t->name.p == NULL)
+            fprintf(stderr, "NULL");
+        else if (fwrite(t->name.p, 1, t->name.s, stderr) != t->name.s)
+            return 1;
+        fprintf(stderr, ": ");
+
+        if (t->built_in)
+            fprintf(stderr, "Built-in");
+        else if (t->text.p == NULL)
+            fprintf(stderr, "NULL");
+        else if (fwrite(t->text.p, 1, t->text.s, stderr) != t->text.s)
+            return 1;
+        putc('\n', stderr);
+
+        ++node;
+        t = next;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -1107,6 +1105,18 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Add the ifelse built-in macro */
+    if (add_built_in_macro(&md, "ifelse", BI_IFELSE)) {
+        ret = 1;
+        goto clean_up;
+    }
+
+    /* Add the dumpdef built-in macro */
+    if (add_built_in_macro(&md, "dumpdef", BI_DUMPDEF)) {
+        ret = 1;
+        goto clean_up;
+    }
+
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -1193,17 +1203,6 @@ int main(int argc, char **argv)
                  * with a letter or an underscore.
                  */
                 if (ma->built_in == BI_DEFINE && AU(*(ma->args + 1))) {
-                    /* define cannot take any more than the first two args */
-                    for (j = 3; j < MAXARGS; ++j) {
-                        if (TEXTSIZE(*(ma->args + j))) {
-                            fprintf(stderr,
-                                    "%s: define: Invalid position of non-empty argument\n",
-                                    *argv);
-                            ret = 1;
-                            goto clean_up;
-                        }
-                    }
-
                     /* Undefine the macro if it is already defined */
                     undefine_macro(&md, *(ma->args + 1));
 
@@ -1240,16 +1239,6 @@ int main(int argc, char **argv)
                     }
                 } else if (ma->built_in == BI_DIVERT) {
                     /* THE divert MACRO */
-                    /* divert takes arg 1 only */
-                    for (j = 2; j < MAXARGS; ++j) {
-                        if (TEXTSIZE(*(ma->args + j))) {
-                            fprintf(stderr,
-                                    "%s: divert: Invalid position of non-empty argument\n",
-                                    *argv);
-                            ret = 1;
-                            goto clean_up;
-                        }
-                    }
                     if (divnum_index(*(ma->args + 1), &act_div)) {
                         fprintf(stderr,
                                 "%s: divert: Invalid divnum supplied\n",
@@ -1259,50 +1248,38 @@ int main(int argc, char **argv)
                     }
                     /* No need to refresh the output shortcut as this will happen later */
                 } else if (ma->built_in == BI_UNDIVERT) {
-                    /* THE undivert MACRO */
-                    /* undivert takes arg 1 only */
-                    for (j = 2; j < MAXARGS; ++j) {
+                    for (j = 1; j < MAXARGS; ++j) {
+                        /* THE undivert MACRO */
+                        /* Skip empty arguments */
                         if (TEXTSIZE(*(ma->args + j))) {
-                            fprintf(stderr,
-                                    "%s: undivert: Invalid position of non-empty argument\n",
-                                    *argv);
-                            ret = 1;
-                            goto clean_up;
-                        }
-                    }
-                    if (divnum_index(*(ma->args + 1), &tmp_index)) {
-                        fprintf(stderr,
-                                "%s: undivert: Invalid divnum supplied\n",
-                                *argv);
-                        ret = 1;
-                        goto clean_up;
-                    }
-                    /* Cannot undivert the active diversion into itself */
-                    if (tmp_index == act_div) {
-                        fprintf(stderr,
-                                "%s: undivert: Cannot undivert the active diversion (%d) into itself\n",
-                                *argv, act_div != 10 ? (int) act_div : -1);
-                        ret = 1;
-                        goto clean_up;
-                    }
+                            if (divnum_index(*(ma->args + j), &tmp_index)) {
+                                fprintf(stderr,
+                                        "%s: undivert: Invalid divnum supplied at argument: %lu\n",
+                                        *argv, (unsigned long) j);
+                                ret = 1;
+                                goto clean_up;
+                            }
+                            /* Cannot undivert the active diversion into itself */
+                            if (tmp_index == act_div) {
+                                fprintf(stderr,
+                                        "%s: undivert: Cannot undivert the active diversion (%d) into itself\n",
+                                        *argv,
+                                        act_div !=
+                                        10 ? (int) act_div : -1);
+                                ret = 1;
+                                goto clean_up;
+                            }
 
-                    /* Undivert into the active diversion (does not change the active diversion index) */
-                    if (undivert(*(div + act_div), *(div + tmp_index))) {
-                        ret = 1;
-                        goto clean_up;
+                            /* Undivert into the active diversion (does not change the active diversion index) */
+                            if (undivert
+                                (*(div + act_div), *(div + tmp_index))) {
+                                ret = 1;
+                                goto clean_up;
+                            }
+                        }
                     }
                 } else if (ma->built_in == BI_CHANGEQUOTE) {
                     /* THE changequote MACRO */
-                    /* changequote cannot take any more than the first two args */
-                    for (j = 3; j < MAXARGS; ++j) {
-                        if (TEXTSIZE(*(ma->args + j))) {
-                            fprintf(stderr,
-                                    "%s: changequote: Invalid position of non-empty argument\n",
-                                    *argv);
-                            ret = 1;
-                            goto clean_up;
-                        }
-                    }
                     /* The quotes must be different, single, graph characters */
                     if (TEXTSIZE(*(ma->args + 1)) != 1
                         || TEXTSIZE(*(ma->args + 2)) != 1
@@ -1320,16 +1297,6 @@ int main(int argc, char **argv)
 
                 } else if (ma->built_in == BI_INCLUDE) {
                     /* THE include MACRO */
-                    /* include takes arg 1 only */
-                    for (j = 2; j < MAXARGS; ++j) {
-                        if (TEXTSIZE(*(ma->args + j))) {
-                            fprintf(stderr,
-                                    "%s: include: Invalid position of non-empty argument\n",
-                                    *argv);
-                            ret = 1;
-                            goto clean_up;
-                        }
-                    }
                     /* Convert arg 1 into the filename */
                     if ((tmp_str =
                          rear_buf_to_str(*(ma->args + 1))) == NULL) {
@@ -1344,16 +1311,6 @@ int main(int argc, char **argv)
                     free(tmp_str);
                 } else if (ma->built_in == BI_ESYSCMD) {
                     /* THE esyscmd MACRO */
-                    /* esyscmd takes arg 1 only */
-                    for (j = 2; j < MAXARGS; ++j) {
-                        if (TEXTSIZE(*(ma->args + j))) {
-                            fprintf(stderr,
-                                    "%s: esyscmd: Invalid position of non-empty argument\n",
-                                    *argv);
-                            ret = 1;
-                            goto clean_up;
-                        }
-                    }
                     /* Convert arg 1 into the shell command string */
                     if ((tmp_str =
                          rear_buf_to_str(*(ma->args + 1))) == NULL) {
@@ -1378,16 +1335,6 @@ int main(int argc, char **argv)
 
                 } else if (ma->built_in == BI_IFDEF) {
                     /* THE ifdef MACRO */
-                    /* ifdef cannot take any more than the first 3 args */
-                    for (j = 4; j < MAXARGS; ++j) {
-                        if (TEXTSIZE(*(ma->args + j))) {
-                            fprintf(stderr,
-                                    "%s: ifdef: Invalid position of non-empty argument\n",
-                                    *argv);
-                            ret = 1;
-                            goto clean_up;
-                        }
-                    }
                     if (!TEXTSIZE(*(ma->args + 1))) {
                         fprintf(stderr,
                                 "%s: ifdef: first argument cannot be empty\n",
@@ -1415,14 +1362,79 @@ int main(int argc, char **argv)
                             goto clean_up;
                         }
                     }
+                } else if (ma->built_in == BI_IFELSE) {
+                    /* THE ifelse MACRO */
+                    /* Empty arguments compare equal */
+                    if ((*(ma->args + 1))->s == (*(ma->args + 2))->s
+                        && !memcmp((*(ma->args + 1))->p,
+                                   (*(ma->args + 2))->p,
+                                   (*(ma->args + 1))->s)) {
+                        /* Arg 1 and 2 are equal */
+                        /* Push arg 3 into input */
+                        if (TEXTSIZE(*(ma->args + 3))
+                            && insert_rear_in_front_buf(input,
+                                                        *(ma->args + 3))) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    } else {
+                        /* Push arg 4 into input */
+                        if (TEXTSIZE(*(ma->args + 4))
+                            && insert_rear_in_front_buf(input,
+                                                        *(ma->args + 4))) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
+
+                } else if (ma->built_in == BI_DUMPDEF) {
+                    /* THE dumpdef MACRO */
+                    if (TEXTSIZE(*(ma->args + 1))) {
+                        /* Write ONE macro name to stderr */
+                        if (fwrite
+                            ((*(ma->args + 1))->p, 1,
+                             TEXTSIZE(*(ma->args + 1)),
+                             stderr) != TEXTSIZE(*(ma->args + 1))) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                        fprintf(stderr, ":\t");
+
+                        /* Look up the macro name */
+                        if (AU(*(ma->args + 1))
+                            && (text_mem =
+                                token_search(md, *(ma->args + 1),
+                                             &bi)) != NULL) {
+                            /* Match */
+                            /* If user defined macro */
+                            if (!bi) {
+                                /* Write macro replacement text */
+                                if (fwrite
+                                    (text_mem->p, 1, text_mem->s,
+                                     stderr) != text_mem->s) {
+                                    ret = 1;
+                                    goto clean_up;
+                                }
+                                putc('\n', stderr);
+                            } else {
+                                /* Built-in */
+                                fprintf(stderr, "Built-in\n");
+                            }
+                        } else {
+                            /* No match */
+                            fprintf(stderr, "Undefined\n");
+                        }
+                    } else {
+                        /* Write ALL macros to stderr */
+                        if (dumpdef_all(md)) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
                 } else {
                     /* USER DEFINED MACROS */
                     /* Clear out result buffer */
                     DELETEBUF(result);
-
-#ifdef DEBUG
-                    print_margs_linked_list(ma);
-#endif
 
                     /* Substitute arguments into defintion */
                     if (sub_args(result, &ma->text, ma->args)) {
@@ -1651,11 +1663,6 @@ int main(int argc, char **argv)
             goto clean_up;
         }
     }
-
-#ifdef DEBUG
-    print_mdef_linked_list(md);
-#endif
-
 
   clean_up:
 #ifdef DEBUG
