@@ -34,9 +34,9 @@
 /* Index 0 is the macro name, indices 1 to 9 are macro arguments */
 #define MAXARGS 10
 /* Number of positive diversions (0 to 9) */
-#define NUMPOSDIVS 10
+#define NUM_NON_NEG_DIVS 10
 /* Number of diversions (0 to 9 and -1) */
-#define NUMDIVS 11
+#define NUM_DIVS 11
 
 #define GROWTH 2
 #define LARGEGAP 2
@@ -76,6 +76,8 @@ FILE *debug_fp = NULL;
 #define BI_IFELSE 11
 /* The dumpdef macro */
 #define BI_DUMPDEF 12
+/* The errprint macro */
+#define BI_ERRPRINT 13
 
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -938,7 +940,7 @@ int main(int argc, char **argv)
     struct rear_buf *token = NULL;
     struct rear_buf *output;    /* This is a shortcut to the changing output */
     /* Diversion output buffers 0 to 9 and -1. Diversion -1 maps to index 10 */
-    struct rear_buf *div[NUMDIVS];
+    struct rear_buf *div[NUM_DIVS];
     size_t act_div = 0;         /* Active diversion */
     size_t tmp_index;           /* Temporary divnum index */
     int end_of_input = 0;       /* Indicates when the input is empty (like EOF) */
@@ -1014,7 +1016,7 @@ int main(int argc, char **argv)
 #endif
 
     /* Setup diversion output buffers */
-    for (j = 0; j < NUMDIVS; ++j) {
+    for (j = 0; j < NUM_DIVS; ++j) {
         if ((*(div + j) = init_rear_buf(LARGEGAP)) == NULL) {
             ret = 1;
             goto clean_up;
@@ -1113,6 +1115,12 @@ int main(int argc, char **argv)
 
     /* Add the dumpdef built-in macro */
     if (add_built_in_macro(&md, "dumpdef", BI_DUMPDEF)) {
+        ret = 1;
+        goto clean_up;
+    }
+
+    /* Add the errprint built-in macro */
+    if (add_built_in_macro(&md, "errprint", BI_ERRPRINT)) {
         ret = 1;
         goto clean_up;
     }
@@ -1304,6 +1312,9 @@ int main(int argc, char **argv)
                         goto clean_up;
                     }
                     if (insert_file(input, tmp_str)) {
+                        fprintf(stderr,
+                                "%s: include: failed to insert file: %s\n",
+                                *argv, tmp_str);
                         free(tmp_str);
                         ret = 1;
                         goto clean_up;
@@ -1389,46 +1400,56 @@ int main(int argc, char **argv)
 
                 } else if (ma->built_in == BI_DUMPDEF) {
                     /* THE dumpdef MACRO */
-                    if (TEXTSIZE(*(ma->args + 1))) {
-                        /* Write ONE macro name to stderr */
-                        if (fwrite
-                            ((*(ma->args + 1))->p, 1,
-                             TEXTSIZE(*(ma->args + 1)),
-                             stderr) != TEXTSIZE(*(ma->args + 1))) {
-                            ret = 1;
-                            goto clean_up;
-                        }
-                        fprintf(stderr, ":\t");
-
-                        /* Look up the macro name */
-                        if (AU(*(ma->args + 1))
-                            && (text_mem =
-                                token_search(md, *(ma->args + 1),
-                                             &bi)) != NULL) {
-                            /* Match */
-                            /* If user defined macro */
-                            if (!bi) {
-                                /* Write macro replacement text */
-                                if (fwrite
-                                    (text_mem->p, 1, text_mem->s,
-                                     stderr) != text_mem->s) {
-                                    ret = 1;
-                                    goto clean_up;
-                                }
-                                putc('\n', stderr);
-                            } else {
-                                /* Built-in */
-                                fprintf(stderr, "Built-in\n");
+                    for (j = 1; j < MAXARGS; ++j) {
+                        if (TEXTSIZE(*(ma->args + j))) {
+                            /* Write ONE macro name to stderr */
+                            if (fwrite
+                                ((*(ma->args + j))->p, 1,
+                                 TEXTSIZE(*(ma->args + j)),
+                                 stderr) != TEXTSIZE(*(ma->args + j))) {
+                                ret = 1;
+                                goto clean_up;
                             }
-                        } else {
-                            /* No match */
-                            fprintf(stderr, "Undefined\n");
+                            fprintf(stderr, ": ");
+
+                            /* Look up the macro name */
+                            if (AU(*(ma->args + j))
+                                && (text_mem =
+                                    token_search(md, *(ma->args + j),
+                                                 &bi)) != NULL) {
+                                /* Match */
+                                /* If user defined macro */
+                                if (!bi) {
+                                    /* Write macro replacement text */
+                                    if (fwrite
+                                        (text_mem->p, 1, text_mem->s,
+                                         stderr) != text_mem->s) {
+                                        ret = 1;
+                                        goto clean_up;
+                                    }
+                                    putc('\n', stderr);
+                                } else {
+                                    /* Built-in */
+                                    fprintf(stderr, "Built-in\n");
+                                }
+                            } else {
+                                /* No match */
+                                fprintf(stderr, "Undefined\n");
+                            }
                         }
-                    } else {
-                        /* Write ALL macros to stderr */
-                        if (dumpdef_all(md)) {
-                            ret = 1;
-                            goto clean_up;
+                    }
+                } else if (ma->built_in == BI_ERRPRINT) {
+                    /* THE errprint MACRO */
+                    /* Write arguments to stderr */
+                    for (j = 1; j < MAXARGS; ++j) {
+                        s = TEXTSIZE(*(ma->args + j));
+                        if (s) {
+                            if (fwrite((*(ma->args + j))->p, 1, s,
+                                       stderr) != s) {
+                                ret = 1;
+                                goto clean_up;
+                            }
+                            putc('\n', stderr);
                         }
                     }
                 } else {
@@ -1533,6 +1554,35 @@ int main(int argc, char **argv)
                                 input->s - input->gs)) != NULL) {
                         /* Delete up to and including the newline character */
                         input->gs = q - input->p + 1;
+                    }
+
+                } else if (ma->built_in == BI_DIVERT) {
+                    /* THE divert MACRO  -- No brackets (arguments) */
+                    /* Defaults to diversion 0 */
+                    act_div = 0;
+                    /* No need to refresh the output shortcut as this will happen later */
+                } else if (ma->built_in == BI_UNDIVERT) {
+                    /* THE undivert MACRO -- No brackets (arguments) */
+                    /* Default is to undivert all diversions (except for diversion -1 and the active diversion) into the active diversion */
+                    for (j = 0; j < NUM_NON_NEG_DIVS; ++j) {
+                        /* Undivert into the active diversion (does not change the active diversion index) */
+                        if (j != act_div && undivert
+                            (*(div + act_div), *(div + tmp_index))) {
+                            ret = 1;
+                            goto clean_up;
+                        }
+                    }
+                } else if (ma->built_in == BI_CHANGEQUOTE) {
+                    /* THE changequote MACRO -- No brackets (arguments) */
+                    /* Restore default quotes */
+                    left_quote = '`';
+                    right_quote = '\'';
+                } else if (ma->built_in == BI_DUMPDEF) {
+                    /* THE dumpdef MACRO -- No brackets (arguments) */
+                    /* Write ALL macros to stderr */
+                    if (dumpdef_all(md)) {
+                        ret = 1;
+                        goto clean_up;
                     }
                 } else {
                     /* USER DEFINED MACRO WITH NO ARGUMENT BRACKETS */
@@ -1656,9 +1706,9 @@ int main(int argc, char **argv)
     }
 
     /* Write diversions to stdout in ascending order (excluding diversion -1) */
-    for (j = 0; j < NUMPOSDIVS; ++j) {
-        if (fwrite((*(div + j))->p, 1, TEXTSIZE(*(div + j)), stdout) !=
-            TEXTSIZE(*(div + j))) {
+    for (j = 0; j < NUM_NON_NEG_DIVS; ++j) {
+        s = TEXTSIZE(*(div + j));
+        if (s && fwrite((*(div + j))->p, 1, s, stdout) != s) {
             ret = 1;
             goto clean_up;
         }
