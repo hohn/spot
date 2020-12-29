@@ -42,15 +42,6 @@
 #define LARGEGAP 2
 #define SMALLGAP 1
 
-/* For debugging */
-#define DEBUG
-
-/* File for debugging */
-#ifdef DEBUG
-#define DEBUGFILE ".m4_debug"
-FILE *debug_fp = NULL;
-#endif
-
 /* Built-in macro identifiers (user defined macros are use 0) */
 /* The define macro */
 #define BI_DEFINE 1
@@ -78,8 +69,12 @@ FILE *debug_fp = NULL;
 #define BI_DUMPDEF 12
 /* The errprint macro */
 #define BI_ERRPRINT 13
+/* The traceon macro */
+#define BI_TRACEON 14
+/* The traceoff macro */
+#define BI_TRACEOFF 15
 
-
+/* size_t overflow checks */
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
 
@@ -372,7 +367,7 @@ void free_margs_linked_list(struct margs *ma)
 
 void print_token(struct rear_buf *token)
 {
-    /* Prints a rear buffer to debug_fp, such as a token (used for debugging) */
+    /* Prints a rear buffer to stderr, such as a token (used by traceon) */
     size_t i = 0;
     size_t ts = TEXTSIZE(token);
     char ch;
@@ -380,49 +375,51 @@ void print_token(struct rear_buf *token)
         return;
     for (i = 0; i < ts; ++i) {
         ch = *(token->p + i);
-        fprintf(debug_fp, isgraph(ch) ? "%c" : "%02X", ch);
+        if (isgraph((unsigned char) ch))
+            putc(ch, stderr);
+        else
+            fprintf(stderr, "%02X", (unsigned char) ch);
     }
-    putc('\n', debug_fp);
+    putc('\n', stderr);
 }
 
-int print_margs_linked_list(struct margs *ma)
+int dump_stack(struct margs *ma)
 {
-    /* Prints the macro arguments linked list (for debugging) */
+    /* Prints the macro arguments linked list to stderr (used in traceon) */
     struct margs *t = ma, *next;
     size_t node = 0, i, s;
 
-    fprintf(debug_fp, "\nMacro arguments stack linked list\n");
-    fprintf(debug_fp, "==================================\n");
+    fprintf(stderr, "*** Dump stack ***\n");
 
     while (t != NULL) {
         next = t->next;
 
-        fprintf(debug_fp, "\nNode: %lu\n", (unsigned long) node);
-        fprintf(debug_fp, "Macro text: ");
+        fprintf(stderr, "NODE: %lu\n", (unsigned long) node);
+        fprintf(stderr, "Macro text: ");
         if (t->text.p == NULL)
-            fprintf(debug_fp, "NULL");
-        else if (fwrite(t->text.p, 1, t->text.s, debug_fp) != t->text.s)
+            fprintf(stderr, "NULL");
+        else if (fwrite(t->text.p, 1, t->text.s, stderr) != t->text.s)
             return 1;
-        fprintf(debug_fp, "\nMacro text size: %lu\n",
+        fprintf(stderr, "\nMacro text size: %lu\n",
                 (unsigned long) t->text.s);
-        fprintf(debug_fp, "Bracket depth: %lu\n",
+        fprintf(stderr, "Bracket depth: %lu\n",
                 (unsigned long) t->bracket_depth);
-        fprintf(debug_fp, "Active argument: %lu\n",
+        fprintf(stderr, "Active argument: %lu\n",
                 (unsigned long) t->act_arg);
 
         /* Arg 0 is not allocated */
         for (i = 1; i < MAXARGS; ++i) {
-            fprintf(debug_fp, "Argument: %lu\n", (unsigned long) i);
             s = TEXTSIZE(*(t->args + i));
             if (s) {
-                if (fwrite((*(t->args + i))->p, 1, s, debug_fp)
+                fprintf(stderr, "Argument %lu: ", (unsigned long) i);
+                if (fwrite((*(t->args + i))->p, 1, s, stderr)
                     != s)
                     return 1;
-                putc('\n', debug_fp);
+                putc('\n', stderr);
             }
         }
 
-        fprintf(debug_fp, "Built-in macro identifier: %d\n", t->built_in);
+        fprintf(stderr, "Built-in macro identifier: %d\n", t->built_in);
 
         ++node;
         t = next;
@@ -961,6 +958,7 @@ int main(int argc, char **argv)
     int eat_whitespace = 0;     /* Eat input whitespace */
     char left_quote = '`';      /* Left quote: default is backtick */
     char right_quote = '\'';    /* Right quote: default is single quote */
+    int trace = 0;              /* Indicates if trace is on */
     int i;
     size_t j;
     char *q;
@@ -1006,14 +1004,6 @@ int main(int argc, char **argv)
             }
         }
     }
-
-#ifdef DEBUG
-    /* Open debugging file */
-    if ((debug_fp = fopen(DEBUGFILE, "wb")) == NULL) {
-        ret = 1;
-        goto clean_up;
-    }
-#endif
 
     /* Setup diversion output buffers */
     for (j = 0; j < NUM_DIVS; ++j) {
@@ -1125,6 +1115,18 @@ int main(int argc, char **argv)
         goto clean_up;
     }
 
+    /* Add the traceon built-in macro */
+    if (add_built_in_macro(&md, "traceon", BI_TRACEON)) {
+        ret = 1;
+        goto clean_up;
+    }
+
+    /* Add the traceoff built-in macro */
+    if (add_built_in_macro(&md, "traceoff", BI_TRACEOFF)) {
+        ret = 1;
+        goto clean_up;
+    }
+
 
     /* The m4 loop */
     while (!read_token(input, token, &end_of_input)) {
@@ -1163,10 +1165,10 @@ int main(int argc, char **argv)
          * into another diversion before the program finishes.
          */
 
-#ifdef DEBUG
-        fprintf(debug_fp, "Token: ");
-        print_token(token);
-#endif
+        if (trace) {
+            fprintf(stderr, "Token: ");
+            print_token(token);
+        }
 
         if (!rear_buf_char_cmp(token, left_quote)) {
             /* TURN ON QUOTE mode if off */
@@ -1203,6 +1205,13 @@ int main(int argc, char **argv)
 
                 /* Decrement unquoted backet depth to zero */
                 --ma->bracket_depth;
+
+                /* If trace is on, then dump the stack */
+                if (trace)
+                    if (dump_stack(ma)) {
+                        ret = 1;
+                        goto clean_up;
+                    }
 
                 /* Check for BUILT-IN MACROS */
 
@@ -1584,6 +1593,12 @@ int main(int argc, char **argv)
                         ret = 1;
                         goto clean_up;
                     }
+                } else if (ma->built_in == BI_TRACEON) {
+                    /* THE traceon MACRO -- No brackets (arguments) */
+                    trace = 1;
+                } else if (ma->built_in == BI_TRACEOFF) {
+                    /* THE traceoff MACRO -- No brackets (arguments) */
+                    trace = 0;
                 } else {
                     /* USER DEFINED MACRO WITH NO ARGUMENT BRACKETS */
                     /* Put the token back on the input */
@@ -1595,9 +1610,12 @@ int main(int argc, char **argv)
                     /* Clear out result buffer */
                     DELETEBUF(result);
 
-#ifdef DEBUG
-                    print_margs_linked_list(ma);
-#endif
+                    /* If trace is on, then dump the stack */
+                    if (trace)
+                        if (dump_stack(ma)) {
+                            ret = 1;
+                            goto clean_up;
+                        }
 
                     /*
                      * Substitute arguments into definition.
@@ -1715,11 +1733,6 @@ int main(int argc, char **argv)
     }
 
   clean_up:
-#ifdef DEBUG
-    if (fclose(debug_fp))
-        ret = 1;
-#endif
-
     if (!end_of_input)
         ret = 1;
     free_front_buf(input);
