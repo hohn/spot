@@ -38,15 +38,15 @@ If no files are specified, then it will read from `stdin`.
 How (this version of) m4 works
 ------------------------------
 
-When `m4' starts all the files listed on the command line are loaded into the
+When `m4` starts all the files listed on the command line are loaded into the
 input buffer in a concatenated manner. If no files are listed, then all of
 `stdin` is read and placed into the input buffer at once.
 
-`m4' reads from the input one token at a time. A token is a series of
+`m4` reads from the input one token at a time. A token is a series of
 alphanumerical or underscore characters that must commence with an
 alpha or underscore character.
 
-`m4' maintains a doubly linked list of macro definitions. The token read is
+`m4` maintains a doubly linked list of macro definitions. The token read is
 compared to the defined macros and if there is no match, then the token is
 simply written to the output buffer, unchanged.
 
@@ -85,14 +85,14 @@ buffers are identified by the `divnum` which can be 0 to 9 (inclusive) or -1.
 
 When the program terminates without error, the diversions 0 to 9, in order, are
 written to `stdout` (there is no progressive writing to `stdout` throughout the
-execution of the program). Diversion -1 is not written to `stdout', it is
+execution of the program). Diversion -1 is not written to `stdout`, it is
 simply discarded, however, it can be undiverted to another diversion before the
 program terminates.
 
 Excess arguments supplied to a built-in macro call are ignored. Since only
 arguments 1 to 9 can be referenced using the `$1` to `$9` notation, all macros
 cannot take more than 9 arguments. Other than this, there are no limits placed
-on this version of `m4', for example, there are no limits (except for random
+on this version of `m4`, for example, there are no limits (except for random
 access memory) on the buffer sizes, or the depth of the stack, or the number
 of defined macros.
 
@@ -177,7 +177,7 @@ ifdef(`macro_name', text_if_defined, text_if_not_defined)
 Collects the arguments (processing any macros possible) then checks if
 argument 1 is in the macro definition list. If so, then argument 2 is prepended
 into the input, otherwise argument 3 is prepended into the input. You will almost
-always want to protect `macro_name' with quotes.
+always want to protect `macro_name` with quotes.
 
 ```
 ifelse(A, B, text_if_A_equals_B, text_if_A_not_equal_to_B)
@@ -199,7 +199,7 @@ If there is no match, then "Undefined" is printed.
 ```
 errprint(message_to_stderr)
 ```
-Prints an error message directly to `stderr'. The argument is still subject
+Prints an error message directly to `stderr`. The argument is still subject
 to expansion during the argument collection phase before the print is
 performed.
 
