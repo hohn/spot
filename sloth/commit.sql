@@ -57,7 +57,7 @@ insert into sloth_commit (cid, t, msg)
 select
 (select a.cid from sloth_tmp_cid as a),
 (select b.t from sloth_tmp_t as b),
-'save'
+(select c.msg from sloth_tmp_msg as c)
 ;
 
 insert into sloth_file (cid, bid, fn)

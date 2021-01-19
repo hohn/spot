@@ -62,6 +62,11 @@ create table sloth_tmp_t
 (t integer not null unique primary key
 );
 
+create table sloth_tmp_msg
+(msg text not null unique primary key,
+check(msg <> '')
+);
+
 create table sloth_user
 (full_name not null unique primary key,
 email text not null unique,
