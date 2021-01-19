@@ -16,6 +16,9 @@
 
 /* Data Definition Language (DDL) for sloth */
 
+/* Stop after first error */
+.bail on
+
 create table sloth_commit
 (cid integer not null unique primary key,
 t integer not null unique,
@@ -41,7 +44,7 @@ create index idx_file_cid on sloth_file(cid);
 create index idx_file_bid on sloth_file(bid);
 
 create table sloth_track
-(fn text not null unique primary key
+(fn text not null unique primary key,
 check(fn <> '')
 );
 
@@ -53,4 +56,25 @@ check(fn <> '')
 
 create table sloth_tmp_cid
 (cid integer not null unique primary key
+);
+
+create table sloth_tmp_t
+(t integer not null unique primary key
+);
+
+create table sloth_user
+(full_name not null unique primary key,
+email text not null unique,
+check(full_name <> ''),
+check(email <> '')
+);
+
+delete from sloth_user;
+insert into sloth_user (full_name, email)
+values('Logan McLintock', 'loganpkg@gmail.com');
+
+/* Only one zero is accepted */
+create table sloth_tmp_trap
+(x integer not null unique,
+check (x = 0)
 );

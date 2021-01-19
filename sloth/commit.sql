@@ -16,14 +16,13 @@
 
 /* sloth commit SQL */
 
-begin;
+/* Stop after first error */
+.bail on
 
 /* Test files */
 delete from sloth_track;
 insert into sloth_track (fn) values ('mouse');
 insert into sloth_track (fn) values ('dog');
-
-
 
 delete from sloth_stage;
 
@@ -40,10 +39,24 @@ delete from sloth_tmp_cid;
 insert into sloth_tmp_cid (cid)
 select coalesce((select max(cid) from sloth_commit), 0) + 1;
 
+delete from sloth_tmp_t;
+
+insert into sloth_tmp_t (t)
+select strftime('%s','now');
+
+delete from sloth_tmp_trap;
+
+/* Will create an error if the new time is less than an existing time */
+insert into sloth_tmp_trap
+select
+count(a.cid)
+from sloth_commit as a
+where a.t > (select b.t from sloth_tmp_t as b);
+
 insert into sloth_commit (cid, t, msg)
 select
 (select a.cid from sloth_tmp_cid as a),
-strftime('%s','now'),
+(select b.t from sloth_tmp_t as b),
 'save'
 ;
 
@@ -57,4 +70,23 @@ inner join sloth_blob as b
 on a.d = b.d
 ;
 
-commit;
+delete from sloth_tmp_trap;
+
+/* Will create an error if there have been no changes */
+insert into sloth_tmp_trap (x)
+select x.c_now = x.c_prev and x.c_now = x.c_union
+from
+(select
+    (select count(a.bid) from sloth_file as a
+        where a.cid = (select b.cid from sloth_tmp_cid as b)) as c_now,
+    (select count(c.bid) from sloth_file as c
+        where c.cid = (select d.cid - 1 from sloth_tmp_cid as d)) as c_prev,
+    (select count(k.bid) from
+        (select e.bid, e.fn from sloth_file as e
+            where e.cid = (select f.cid from sloth_tmp_cid as f)
+        union
+        select g.bid, g.fn from sloth_file as g
+            where g.cid = (select h.cid - 1 from sloth_tmp_cid as h)
+        ) as k
+    ) as c_union
+) as x;
