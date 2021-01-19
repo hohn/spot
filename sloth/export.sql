@@ -16,6 +16,9 @@
 
 /* Export SQL for sloth */
 
+/* Stop after first error */
+.bail on
+
 /* Export the blobs first */
 select
 'blob' || x'0A'
