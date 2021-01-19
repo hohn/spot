@@ -16,40 +16,23 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-# sloth commit
+# sloth init
 
 # Stop after first error
 set -e
 set -u
 set -x
 
-if [ "$#" -ne 1 ]
+if [ "$#" -ne 0 ]
 then
-    printf 'Usage: %s message\n' "$0" 1>&2
+    printf 'Usage: %s\n' "$0" 1>&2
     exit 1
 fi
 
-m="$1"
-
 script_dir=$(dirname "$0")
 
-# Copy database and edit the copy as SQLite transactions
-# are hard to rollback properly.
+rm -f sloth.db
 
-sqlite3 sloth.db <<'EOF'
-.backup sloth_copy.db
+sqlite3 sloth.db <<EOF
+.read $script_dir/ddl.sql
 EOF
-
-# Record the comment message
-sqlite3 sloth_copy.db <<EOF
-.bail on
-delete from sloth_tmp_msg;
-insert into sloth_tmp_msg (msg) values('$m');
-EOF
-
-sqlite3 sloth_copy.db <<EOF
-.read $script_dir/commit.sql
-EOF
-
-# Atomic
-mv sloth_copy.db sloth.db
