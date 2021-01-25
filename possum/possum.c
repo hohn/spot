@@ -28,6 +28,7 @@
 #include <unistd.h>
 #endif
 #include <errno.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,13 +43,17 @@
 #define JFN "/home/logan/bin/jdupes"
 #endif
 
+#define STR_BLOCK 512
+
+#define AOF(a, b) ((a) > SIZE_MAX - (b))
+#define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
+
 /* Log without errno */
 #define LOG(m) fprintf(stderr, "%s: %s: %d: %s\n", __FILE__, func, __LINE__, m)
 /* Log with errno */
 #define LOGE(m) fprintf(stderr, "%s: %s: %d: %s: %s\n", \
     __FILE__, func, __LINE__, m, strerror(errno))
 
-#define AOF(a, b) ((a) > SIZE_MAX - (b))
 
 #ifdef _WIN32
 int run_program(char *fn, char **av)
@@ -100,7 +105,8 @@ int run_program(char *fn, char **av)
     }
     i = 0;
     j = 0;
-    if ((cl = malloc(s)) == NULL) return 1;
+    if ((cl = malloc(s)) == NULL)
+        return 1;
     while (*(av + i) != NULL) {
         len = strlen(*(av + i));
         *(cl + j++) = '"';
@@ -113,11 +119,12 @@ int run_program(char *fn, char **av)
     }
     *(cl + j) = '\0';
 
-    if(!CreateProcessA(fn, cl, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    if (!CreateProcessA
+        (fn, cl, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
         LOG("CreateProcess failed");
         return 1;
     }
-    if(WaitForSingleObject(pi.hProcess, INFINITE) == WAIT_FAILED) {
+    if (WaitForSingleObject(pi.hProcess, INFINITE) == WAIT_FAILED) {
         LOG("WaitForSingleObject failed");
         ret = 1;
         goto clean_up;
@@ -133,7 +140,7 @@ int run_program(char *fn, char **av)
         goto clean_up;
     }
 
-clean_up:
+  clean_up:
     if (!CloseHandle(pi.hThread)) {
         LOG("CloseHandle failed");
         ret = 1;
@@ -182,42 +189,84 @@ int run_program(char *fn, char **av)
         LOGE("wait failed");
         return 1;
     }
-    if (WIFEXITED(status) && !WEXITSTATUS(status)) return 0;
+    if (WIFEXITED(status) && !WEXITSTATUS(status))
+        return 0;
     LOG("Child process did not exit successfully");
     return 1;
 }
 #endif
 
-char *join_str(char *a, char *b)
-{
-    char *func = "join_str";
-    char *p;
-    size_t lena, lenb, s;
-    if (a == NULL || b == NULL) {
-        LOG("Cannot have NULL input string");
-        return NULL;
-    }
-    lena = strlen(a);
-    lenb = strlen(b);
 
-    if (AOF(lena, lenb)) {
-        LOG("size_t addition overflow");
-        return NULL;
-    }
-    s = lena + lenb;
-    if (AOF(s, 1)) {
-        LOG("size_t addition overflow");
-        return NULL;
-    }
-    ++s;
+
+char *concat(char *str1, ...)
+{
+/*
+ * Concatenate multiple strings. Last argument must be NULL.
+ * Returns NULL on error or a pointer to the concatenated string on success.
+ * Must free the concatenated string after use.
+ */
+    int err = 0;
+    va_list arg_p;
+    char *str;
+    size_t len;
+    char *p;                    /* Buffer pointer */
+    char *t;                    /* Temporary buffer pointer */
+    size_t u = 0;               /* Used memory */
+    size_t s;                   /* Total memory size */
+    size_t n;                   /* Temporary new size */
+
     errno = 0;
-    if ((p = malloc(s)) == NULL) {
-        LOGE("malloc failed");
+    if ((p = malloc(STR_BLOCK)) == NULL)
+        return NULL;
+
+    s = STR_BLOCK;
+
+    va_start(arg_p, str1);
+    str = str1;
+    while (str != NULL) {
+        len = strlen(str);
+
+        /* Need to save space for terminating \0 char */
+        if (len >= s - u) {
+            /* Grow buffer */
+            if (AOF(len, 1)) {
+                err = 1;
+                goto clean_up;
+            }
+            n = len + 1 - (s - u);
+            if (AOF(s, n)) {
+                err = 1;
+                goto clean_up;
+            }
+            n += s;
+            if (MOF(n, 2)) {
+                err = 1;
+                goto clean_up;
+            }
+            n *= 2;
+            if ((t = realloc(p, n)) == NULL) {
+                err = 1;
+                goto clean_up;
+            }
+            p = t;
+            s = n;
+        }
+        memcpy(p + u, str, len);
+        u += len;
+
+        str = va_arg(arg_p, char *);
+    }
+
+    *(p + u) = '\0';
+
+  clean_up:
+    va_end(arg_p);
+
+    if (err) {
+        free(p);
         return NULL;
     }
-    memcpy(p, a, lena);
-    memcpy(p + lena, b, lenb);
-    *(p + lena + lenb) = '\0';
+
     return p;
 }
 
@@ -228,17 +277,21 @@ int main(int argc, char **argv)
     char *eav[] = { "exiftool", "-r", "-FileName<CreateDate", "-d", NULL,
         "-ext", "heic", "-ext", "jpg", "-ext", "jpeg",
         "-ext", "mov", "-ext", "mp4",
-        NULL, NULL };
+        NULL, NULL
+    };
     char *df, *f = "/%Y/%m/%Y_%m_%d_%H_%M_%S%%-c.%%ue";
 
-    char *eav2[] = { "exiftool", "-r", "-FileName<FileModifyDate", "-d", NULL,
+    char *eav2[] =
+        { "exiftool", "-r", "-FileName<FileModifyDate", "-d", NULL,
         "-ext", "heic", "-ext", "jpg", "-ext", "jpeg",
         "-ext", "mov", "-ext", "mp4",
-        NULL, NULL };
+        NULL, NULL
+    };
     char *df2, *f2 = "/noexifdate/%Y_%m_%d_%H_%M_%S%%-c.%%ue";
 
     char *jav[] = { "jdupes", "--recurse", "--delete", "--noprompt", NULL,
-        NULL };
+        NULL
+    };
 
     char *search_dir, *store_dir;
 
@@ -250,8 +303,8 @@ int main(int argc, char **argv)
     search_dir = *(argv + 1);
     store_dir = *(argv + 2);
 
-    if ((df = join_str(store_dir, f)) == NULL) {
-        LOG("join_str failed");
+    if ((df = concat(store_dir, f, NULL)) == NULL) {
+        LOG("concat failed");
         return 1;
     }
     *(eav + 4) = df;
@@ -265,8 +318,8 @@ int main(int argc, char **argv)
 
     free(df);
 
-    if ((df2 = join_str(store_dir, f2)) == NULL) {
-        LOG("join_str failed");
+    if ((df2 = concat(store_dir, f2, NULL)) == NULL) {
+        LOG("concat failed");
         return 1;
     }
     *(eav2 + 4) = df2;
