@@ -425,11 +425,11 @@ void set_bad(size_t * bad, char *p, size_t u)
         *(bad + *(pat + i)) = u - i;
 }
 
-char *memmatch(char *big, size_t bs, char *small, size_t ss, size_t * bad)
+char *memmatch(char *big, size_t bs, char *little, size_t ls, size_t * bad)
 {
     /*
-     * Returns the first occurance of small in big.
-     * If ss >= 1 then the Quick Search algorithm is used
+     * Returns the first occurance of little in big.
+     * If ls >= 1 then the Quick Search algorithm is used
      * and the bad character table must be provided.
      */
     char *q, *stop, *q_copy, *pat;
@@ -437,23 +437,23 @@ char *memmatch(char *big, size_t bs, char *small, size_t ss, size_t * bad)
     int found = 0;
 
     /*
-     * Not possible to find anything. Note that a zero ss is not considered
+     * Not possible to find anything. Note that a zero ls is not considered
      * a match at the start of big.
      */
-    if (big == NULL || !bs || small == NULL || !ss || ss > bs)
+    if (big == NULL || !bs || little == NULL || !ls || ls > bs)
         return NULL;
 
-    if (ss == 1) {
+    if (ls == 1) {
         /* Single character pattern */
-        return memchr(big, *small, bs);
+        return memchr(big, *little, bs);
     }
     /* Quick Search algorithm */
     q = big;
-    stop = big + bs - ss;       /* Inclusive stop pointer */
+    stop = big + bs - ls;       /* Inclusive stop pointer */
     while (q <= stop) {
         q_copy = q;
-        pat = small;
-        patlen = ss;
+        pat = little;
+        patlen = ls;
         /* Compare pattern to text */
         do {
             if (*q_copy++ != *pat++)
@@ -465,7 +465,7 @@ char *memmatch(char *big, size_t bs, char *small, size_t ss, size_t * bad)
             break;
         }
         /* Jump using the bad character table */
-        q += *(bad + (unsigned char) *(q + ss));
+        q += *(bad + (unsigned char) *(q + ls));
     }
     if (!found)
         return NULL;

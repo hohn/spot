@@ -388,7 +388,7 @@ int draw_screen(struct graph *g, struct buffer *b, struct mem *sb,
 
     if (snprintf(sb->p, sb->s,
                  "%c%c %s (%lu, %lu) %c%c",
-                 cr ? '!' : ' ', b->mod ? '*' : ' ', b->fn, b->r, b->col,
+                 cr ? '!' : ' ', b->mod ? '*' : ' ', b->fn, (unsigned long) b->r, (unsigned long) b->col,
                  'a' + (char) ap, b->m_set ? 'm' : ' ') < 0)
         return 1;
 

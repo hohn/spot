@@ -113,7 +113,8 @@ int match_brace(struct buffer *b);
 void delete_buffer(struct buffer *b);
 void trim_clean(struct buffer *b);
 void set_bad(size_t * bad, char *p, size_t u);
-char *memmatch(char *big, size_t bs, char *small, size_t ss, size_t * bad);
+char *memmatch(char *big, size_t bs, char *little, size_t ls,
+               size_t * bad);
 int search(struct buffer *b, struct mem *se, size_t * bad);
 int replace(struct buffer *b, struct mem *rp);
 int insert_char(struct buffer *b, char ch, size_t mult);
