@@ -215,7 +215,6 @@ char *concat(char *str1, ...)
     size_t s;                   /* Total memory size */
     size_t n;                   /* Temporary new size */
 
-    errno = 0;
     if ((p = malloc(STR_BLOCK)) == NULL)
         return NULL;
 
