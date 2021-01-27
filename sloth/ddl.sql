@@ -16,12 +16,10 @@
 
 /* Data Definition Language (DDL) for sloth */
 
-/* Stop after first error */
-.bail on
+SQL_OPTS
 
 create table sloth_commit
-(cid integer not null unique primary key,
-t integer not null unique,
+(t integer not null unique primary key,
 msg text not null,
 check(msg <> '')
 );
@@ -34,13 +32,14 @@ d blob not null unique
 create unique index uidx_blob_data on sloth_blob(d);
 
 create table sloth_file
-(cid integer not null,
+(fn text not null,
 bid integer not null,
-fn text not null,
+entry_t integer not null, /* Inclusive */
+exit_t integer not null, /* Exclusive */
 check(fn <> '')
 );
 
-create index idx_file_cid on sloth_file(cid);
+/* Probably need some time index */
 create index idx_file_bid on sloth_file(bid);
 
 create table sloth_track
@@ -54,10 +53,6 @@ d blob not null unique,
 check(fn <> '')
 );
 
-create table sloth_tmp_cid
-(cid integer not null unique primary key
-);
-
 create table sloth_tmp_t
 (t integer not null unique primary key
 );
@@ -67,6 +62,7 @@ create table sloth_tmp_msg
 check(msg <> '')
 );
 
+/* Just used for export */
 create table sloth_user
 (full_name not null unique primary key,
 email text not null unique,
@@ -83,3 +79,5 @@ create table sloth_tmp_trap
 (x integer not null unique,
 check (x = 0)
 );
+
+.quit

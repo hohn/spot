@@ -16,8 +16,11 @@
 
 /* sloth commit SQL */
 
-/* Stop after first error */
-.bail on
+SQL_OPTS
+
+/* Will be passed as an arg */
+delete from sloth_tmp_msg;
+insert into sloth_tmp_msg (msg) values('save');
 
 /* Test files */
 delete from sloth_track;
@@ -34,11 +37,6 @@ insert into sloth_blob (d)
 select a.d from sloth_stage as a
 where a.d not in (select b.d from sloth_blob as b);
 
-delete from sloth_tmp_cid;
-
-insert into sloth_tmp_cid (cid)
-select coalesce((select max(cid) from sloth_commit), 0) + 1;
-
 delete from sloth_tmp_t;
 
 insert into sloth_tmp_t (t)
@@ -46,25 +44,67 @@ select strftime('%s','now');
 
 delete from sloth_tmp_trap;
 
-/* Will create an error if the new time is less than an existing time */
+/* Will create an error if there is an old time greater than the current time */
 insert into sloth_tmp_trap
 select
-count(a.cid)
+count(a.t)
 from sloth_commit as a
 where a.t > (select b.t from sloth_tmp_t as b);
 
-insert into sloth_commit (cid, t, msg)
+insert into sloth_commit (t, msg)
 select
-(select a.cid from sloth_tmp_cid as a),
 (select b.t from sloth_tmp_t as b),
 (select c.msg from sloth_tmp_msg as c)
 ;
 
-insert into sloth_file (cid, bid, fn)
+
+/* Close off open records that are now gone */
+update sloth_file
+set exit_t = (select b.t from sloth_tmp_t as b)
+where
+/* Record is open */
+(select c.t from sloth_tmp_t as c) >= entry_t
+and (select d.t from sloth_tmp_t as d) < exit_t
+/* Record now gone */
+and (fn, bid) not in
+(select
+e.fn,
+f.bid
+from sloth_stage as e
+inner join sloth_blob as f
+on e.d = f.d
+)
+;
+
+/* Delete staged present records that are still open */
+delete from sloth_stage as a
+where a.fn in
+(select
+b.fn
+from sloth_stage as b
+inner join sloth_blob as c
+on b.d = c.d
+where (b.fn, c.bid) in
+(select
+d.fn,
+d.bid
+from sloth_file as d
+where
+/* Record is open */
+(select e.t from sloth_tmp_t as e) >= d.entry_t
+and (select f.t from sloth_tmp_t as f) < d.exit_t
+)
+)
+;
+
+/* Insert new records */
+insert into sloth_file (fn, bid, entry_t, exit_t)
 select
-(select c.cid from sloth_tmp_cid as c),
+a.fn,
 b.bid,
-a.fn
+(select c.t from sloth_tmp_t as c),
+/* Will not overflow if timezone is added */
+strftime('%s', '9999-12-31 00:00:00')
 from sloth_stage as a
 inner join sloth_blob as b
 on a.d = b.d
@@ -73,6 +113,8 @@ on a.d = b.d
 delete from sloth_tmp_trap;
 
 /* Will create an error if there have been no changes */
+/* UP TO HERE */
+/*
 insert into sloth_tmp_trap (x)
 select x.c_now = x.c_prev and x.c_now = x.c_union
 from
@@ -90,3 +132,6 @@ from
         ) as k
     ) as c_union
 ) as x;
+*/
+
+.quit
