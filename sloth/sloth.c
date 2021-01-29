@@ -156,28 +156,65 @@ int run_sql(char *ex_dir, char *script_name)
     return ret;
 }
 
+char *dirpart(char *path)
+{
+/*
+ * Gets the directory part of a file path.
+ * Returns NULL on error or a pointer to the concatenated string on success.
+ * Must free the concatenated string after use.
+ */
+
+    char *q = path;
+    char *last = NULL;
+    char dir_sep;
+    size_t s;
+    char *p;
+
+#ifdef _WIN32
+    dir_sep = '\\';
+#else
+    dir_sep = '/';
+#endif
+
+    while (*q != '\0') {
+        if (*q == dir_sep)
+            last = q;
+        ++q;
+    }
+
+/* No directory separator found */
+    if (last == NULL)
+        return NULL;
+
+    s = last - path;
+
+/* Overflow is impossible */
+    if ((p = malloc(s + 1)) == NULL)
+        return NULL;
+
+    memcpy(p, path, s);
+    *(p + s) = '\0';
+
+    return p;
+}
+
 int main(int argc, char **argv)
 {
     int ret = 0;
-    char *dn;
     char *ex_dir;
     char *opt = NULL;
-
-    if ((dn = dirname(*argv)) == NULL)
-        return 1;
-
-    if ((ex_dir = concat(dn, NULL)) == NULL) {
-        ret = 1;
-        goto clean_up;
-    }
-    if ((opt = concat(*(argv + 1), NULL)) == NULL) {
-        ret = 1;
-        goto clean_up;
-    }
 
     if (argc < 2) {
         fprintf(stderr, "Usage: %s help\n", *argv);
         return 1;
+    }
+
+    if ((ex_dir = dirpart(*argv)) == NULL)
+        return 1;
+
+    if ((opt = strdup(*(argv + 1))) == NULL) {
+        ret = 1;
+        goto clean_up;
     }
 
     if (!strcmp(opt, "init")) {
