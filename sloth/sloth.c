@@ -26,7 +26,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
-#include <libgen.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -134,6 +133,14 @@ char *path_join(char *dirpart, char *basepart)
     if (dirpart == NULL || basepart == NULL)
         return NULL;
     dp_len = strlen(dirpart);
+
+    /* dirpart is an empty string */
+    if (!dp_len) {
+        if ((p = strdup(basepart)) == NULL)
+            return NULL;
+        return p;
+    }
+
     bp_len = strlen(basepart);
 
 #ifdef _WIN32
@@ -162,12 +169,13 @@ char *dirpart(char *path)
 {
 /*
  * Gets the directory part of a file path.
+ * If there is no directory separator then the empty string is returned,
+ * not the "." dot directory.
  * Returns NULL on error or a pointer to the concatenated string on success.
  * Must free the concatenated string after use.
  */
-
     char *q = path;
-    char *last = NULL;
+    char *last = q;
     char dir_sep;
     size_t len;
     char *p;
@@ -183,10 +191,6 @@ char *dirpart(char *path)
             last = q;
         ++q;
     }
-
-/* No directory separator found */
-    if (last == NULL)
-        return NULL;
 
     len = last - path;
 
