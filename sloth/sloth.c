@@ -126,6 +126,80 @@ char *concat(char *str1, ...)
     return p;
 }
 
+char *path_join(char *dirpart, char *basepart)
+{
+    size_t dp_len, bp_len, len;
+    char dir_sep;
+    char *p;
+    if (dirpart == NULL || basepart == NULL)
+        return NULL;
+    dp_len = strlen(dirpart);
+    bp_len = strlen(basepart);
+
+#ifdef _WIN32
+    dir_sep = '\\';
+#else
+    dir_sep = '/';
+#endif
+
+    if (AOF(dp_len, bp_len))
+        return NULL;
+    len = dp_len + bp_len;
+    if (AOF(len, 2))
+        return NULL;
+    ++len;                      /* For directory separator */
+    if ((p = malloc(len + 1)) == NULL)
+        return NULL;
+
+    memcpy(p, dirpart, dp_len);
+    *(p + dp_len) = dir_sep;
+    memcpy(p + dp_len + 1, basepart, bp_len);
+    *(p + len) = '\0';
+    return p;
+}
+
+char *dirpart(char *path)
+{
+/*
+ * Gets the directory part of a file path.
+ * Returns NULL on error or a pointer to the concatenated string on success.
+ * Must free the concatenated string after use.
+ */
+
+    char *q = path;
+    char *last = NULL;
+    char dir_sep;
+    size_t len;
+    char *p;
+
+#ifdef _WIN32
+    dir_sep = '\\';
+#else
+    dir_sep = '/';
+#endif
+
+    while (*q != '\0') {
+        if (*q == dir_sep)
+            last = q;
+        ++q;
+    }
+
+/* No directory separator found */
+    if (last == NULL)
+        return NULL;
+
+    len = last - path;
+
+    /* Overflow is impossible */
+    if ((p = malloc(len + 1)) == NULL)
+        return NULL;
+
+    memcpy(p, path, len);
+    *(p + len) = '\0';
+
+    return p;
+}
+
 int sys_cmd(char *cmd)
 {
     /* Executes a system command */
@@ -149,9 +223,9 @@ int run_sql(char *ex_dir, char *script_name)
     char *macro_path;
     char *cmd;
 
-    if ((sql_path = concat(ex_dir, "/", script_name, NULL)) == NULL)
+    if ((sql_path = path_join(ex_dir, script_name)) == NULL)
         return 1;
-    if ((macro_path = concat(ex_dir, "/", "macros.m4", NULL)) == NULL)
+    if ((macro_path = path_join(ex_dir, "macros.m4")) == NULL)
         return 1;
     if ((cmd =
          concat("m4 ", macro_path, " ", sql_path, " | sqlite3 sloth.db",
@@ -170,48 +244,6 @@ int run_sql(char *ex_dir, char *script_name)
     free(macro_path);
     free(cmd);
     return ret;
-}
-
-char *dirpart(char *path)
-{
-/*
- * Gets the directory part of a file path.
- * Returns NULL on error or a pointer to the concatenated string on success.
- * Must free the concatenated string after use.
- */
-
-    char *q = path;
-    char *last = NULL;
-    char dir_sep;
-    size_t s;
-    char *p;
-
-#ifdef _WIN32
-    dir_sep = '\\';
-#else
-    dir_sep = '/';
-#endif
-
-    while (*q != '\0') {
-        if (*q == dir_sep)
-            last = q;
-        ++q;
-    }
-
-/* No directory separator found */
-    if (last == NULL)
-        return NULL;
-
-    s = last - path;
-
-/* Overflow is impossible */
-    if ((p = malloc(s + 1)) == NULL)
-        return NULL;
-
-    memcpy(p, path, s);
-    *(p + s) = '\0';
-
-    return p;
 }
 
 int main(int argc, char **argv)
