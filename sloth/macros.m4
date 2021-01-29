@@ -1,5 +1,6 @@
 divert(-1)
 changequote([, ])
+
 define(SQL_OPTS,
 [.bail on
 .changes on
@@ -10,4 +11,9 @@ define(SQL_OPTS,
 .mode ascii
 .nullvalue NULL
 .separator "^" "\n"])
+
+define(ENTER_BACKUP,
+[.backup sloth_copy.db
+.open sloth_copy.db])
+
 divert

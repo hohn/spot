@@ -38,6 +38,22 @@
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
 
+int mv_file(char *from_file, char *to_file)
+{
+#ifdef _WIN32
+    /* NOT atomic */
+    if (!MoveFileEx
+        (from_file, to_file,
+         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return 1;
+#else
+    /* Atomic */
+    if (rename(from_file, to_file))
+        return 1;
+#endif
+    return 0;
+}
+
 
 char *concat(char *str1, ...)
 {
@@ -228,8 +244,11 @@ int main(int argc, char **argv)
             ret = 1;
             goto clean_up;
         }
-
-
+        /* Atomic on POSIX */
+        if (mv_file("sloth_copy.db", "sloth.db")) {
+            ret = 1;
+            goto clean_up;
+        }
     } else {
         fprintf(stderr, "%s: Invalid option: %s\n", *argv, opt);
         ret = 1;

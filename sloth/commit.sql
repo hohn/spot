@@ -17,6 +17,7 @@
 /* sloth commit SQL */
 
 SQL_OPTS
+ENTER_BACKUP
 
 /* Will be passed as an arg */
 delete from sloth_tmp_msg;
