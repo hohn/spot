@@ -38,6 +38,17 @@ insert into sloth_blob (d)
 select a.d from sloth_stage as a
 where a.d not in (select b.d from sloth_blob as b);
 
+delete from sloth_stage_clamp;
+
+insert into sloth_stage_clamp
+select
+a.fn,
+b.bid
+from sloth_stage as a
+inner join sloth_blob as b
+on a.d = b.d
+;
+
 delete from sloth_tmp_t;
 
 insert into sloth_tmp_t (t)
@@ -52,14 +63,18 @@ count(a.t)
 from sloth_commit as a
 where a.t > (select b.t from sloth_tmp_t as b);
 
+delete from sloth_prev_t;
+
+insert into sloth_prev_t (t)
+select max(t) from sloth_commit;
+
 insert into sloth_commit (t, msg)
 select
 (select b.t from sloth_tmp_t as b),
 (select c.msg from sloth_tmp_msg as c)
 ;
 
-
-/* Close off open records that are now gone */
+/* Close off open records that are now gone (not staged) */
 update sloth_file
 set exit_t = (select b.t from sloth_tmp_t as b)
 where
@@ -70,69 +85,61 @@ and (select d.t from sloth_tmp_t as d) < exit_t
 and (fn, bid) not in
 (select
 e.fn,
-f.bid
-from sloth_stage as e
-inner join sloth_blob as f
-on e.d = f.d
-)
-;
+e.bid
+from sloth_stage_clamp as e
+);
 
 /* Delete staged present records that are still open */
-delete from sloth_stage as a
-where a.fn in
+delete from sloth_stage_clamp as a
+where (a.fn, a.bid) in
 (select
-b.fn
-from sloth_stage as b
-inner join sloth_blob as c
-on b.d = c.d
-where (b.fn, c.bid) in
-(select
-d.fn,
-d.bid
-from sloth_file as d
+b.fn,
+b.bid
+from sloth_file as b
 where
 /* Record is open */
-(select e.t from sloth_tmp_t as e) >= d.entry_t
-and (select f.t from sloth_tmp_t as f) < d.exit_t
-)
-)
-;
+(select c.t from sloth_tmp_t as c) >= b.entry_t
+and (select d.t from sloth_tmp_t as d) < b.exit_t
+);
 
 /* Insert new records */
 insert into sloth_file (fn, bid, entry_t, exit_t)
 select
 a.fn,
-b.bid,
-(select c.t from sloth_tmp_t as c),
+a.bid,
+(select b.t from sloth_tmp_t as b),
 /* Will not overflow if timezone is added */
 strftime('%s', '9999-12-31 00:00:00')
-from sloth_stage as a
-inner join sloth_blob as b
-on a.d = b.d
+from sloth_stage_clamp as a
 ;
 
 delete from sloth_tmp_trap;
 
 /* Will create an error if there have been no changes */
-/* UP TO HERE */
-/*
 insert into sloth_tmp_trap (x)
-select x.c_now = x.c_prev and x.c_now = x.c_union
+select z.count_now = z.count_prev and z.count_now = z.count_union
 from
 (select
-    (select count(a.bid) from sloth_file as a
-        where a.cid = (select b.cid from sloth_tmp_cid as b)) as c_now,
-    (select count(c.bid) from sloth_file as c
-        where c.cid = (select d.cid - 1 from sloth_tmp_cid as d)) as c_prev,
-    (select count(k.bid) from
-        (select e.bid, e.fn from sloth_file as e
-            where e.cid = (select f.cid from sloth_tmp_cid as f)
+    (select count(w.bid) from sloth_file as w
+        where (select a.t from sloth_tmp_t as a) >= w.entry_t
+          and (select b.t from sloth_tmp_t as b) <  w.exit_t
+    ) as count_now,
+
+    (select count(x.bid) from sloth_file as x
+        where (select c.t from sloth_prev_t as c) >= x.entry_t
+          and (select d.t from sloth_prev_t as d) <  x.exit_t
+    ) as count_prev,
+
+    (select count(y.bid) from
+        (select q.bid, q.fn from sloth_file as q
+            where (select e.t from sloth_tmp_t as e) >= q.entry_t
+              and (select f.t from sloth_tmp_t as f) <  q.exit_t
         union
-        select g.bid, g.fn from sloth_file as g
-            where g.cid = (select h.cid - 1 from sloth_tmp_cid as h)
-        ) as k
-    ) as c_union
-) as x;
-*/
+        select r.bid, r.fn from sloth_file as r
+            where (select g.t from sloth_prev_t as g) >= r.entry_t
+              and (select h.t from sloth_prev_t as h) <  r.exit_t
+        ) as y
+    ) as count_union
+) as z;
 
 .quit

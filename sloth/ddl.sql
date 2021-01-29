@@ -53,7 +53,18 @@ d blob not null unique,
 check(fn <> '')
 );
 
+create table sloth_stage_clamp
+(fn text not null unique primary key,
+bid integer not null unique,
+check(fn <> '')
+);
+
 create table sloth_tmp_t
+(t integer not null unique primary key
+);
+
+/* Time of the previous commit */
+create table sloth_prev_t
 (t integer not null unique primary key
 );
 
