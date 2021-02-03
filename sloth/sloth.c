@@ -20,12 +20,15 @@
  */
 
 #ifdef _WIN32
+/* For rand_s */
+#define _CRT_RAND_S
 #include <windows.h>
 #else
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,6 +39,76 @@
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
 #define MOF(a, b) ((a) && (b) > SIZE_MAX / (a))
+
+char *random_alnum_str(size_t len)
+{
+    char *p;
+    unsigned char *t, u;
+    size_t i, j;
+#ifdef _WIN32
+    unsigned int r;
+    size_t ts = sizeof(unsigned int);
+#else
+    FILE *fp;
+    size_t ts = 64;
+#endif
+
+    if (AOF(len, 1))
+        return NULL;
+    if ((p = malloc(len + 1)) == NULL)
+        return NULL;
+
+#ifndef _WIN32
+    if ((t = malloc(ts)) == NULL) {
+        free(p);
+        return NULL;
+    }
+    if ((fp = fopen("/dev/urandom", "r")) == NULL) {
+        free(p);
+        free(t);
+        return NULL;
+    }
+#endif
+
+    j = 0;
+    while (j != len) {
+#ifdef _WIN32
+        if (rand_s(&r)) {
+            free(p);
+            return NULL;
+        }
+        t = (unsigned char *) &r;
+#else
+        if (fread(t, 1, ts, fp) != ts) {
+            free(p);
+            free(t);
+            fclose(fp);
+            return NULL;
+        }
+#endif
+
+        for (i = 0; i < ts; ++i) {
+            u = *(t + i);
+            if (isalnum(u)) {
+                *(p + j++) = u;
+                if (j == len)
+                    break;
+            }
+        }
+    }
+
+    *(p + j) = '\0';
+
+#ifndef _WIN32
+    free(t);
+    if (fclose(fp)) {
+        free(p);
+        return NULL;
+    }
+#endif
+
+    return p;
+}
 
 int mv_file(char *from_file, char *to_file)
 {
@@ -125,23 +198,25 @@ char *concat(char *str1, ...)
     return p;
 }
 
-char *path_join(char *dirpart, char *basepart)
+char *path_join(char *directory_name, char *file_base_name)
 {
-    size_t dp_len, bp_len, len;
+    size_t d_len, f_len, len;
     char dir_sep;
     char *p;
-    if (dirpart == NULL || basepart == NULL)
-        return NULL;
-    dp_len = strlen(dirpart);
 
-    /* dirpart is an empty string */
-    if (!dp_len) {
-        if ((p = strdup(basepart)) == NULL)
+    if (directory_name == NULL || file_base_name == NULL)
+        return NULL;
+
+    d_len = strlen(directory_name);
+
+    /* directory_name is an empty string */
+    if (!d_len) {
+        if ((p = strdup(file_base_name)) == NULL)
             return NULL;
         return p;
     }
 
-    bp_len = strlen(basepart);
+    f_len = strlen(file_base_name);
 
 #ifdef _WIN32
     dir_sep = '\\';
@@ -149,42 +224,42 @@ char *path_join(char *dirpart, char *basepart)
     dir_sep = '/';
 #endif
 
-    if (AOF(dp_len, bp_len))
+    if (AOF(d_len, f_len))
         return NULL;
-    len = dp_len + bp_len;
+    len = d_len + f_len;
     if (AOF(len, 2))
         return NULL;
     ++len;                      /* For directory separator */
     if ((p = malloc(len + 1)) == NULL)
         return NULL;
 
-    memcpy(p, dirpart, dp_len);
-    *(p + dp_len) = dir_sep;
-    memcpy(p + dp_len + 1, basepart, bp_len);
+    memcpy(p, directory_name, d_len);
+    *(p + d_len) = dir_sep;
+    memcpy(p + d_len + 1, file_base_name, f_len);
     *(p + len) = '\0';
     return p;
 }
 
-char *dirpart(char *path)
+char *directory_name(char *file_path)
 {
-/*
- * Gets the directory part of a file path.
- * If there is no directory separator then the empty string is returned,
- * not the "." dot directory.
- * Returns NULL on error or a pointer to the concatenated string on success.
- * Must free the concatenated string after use.
- */
-    char *q = path;
-    char *last = q;
-    char dir_sep;
+    /*
+     * Returns the directory name of a file path (must be a file).
+     * Returns NULL on error, or the directory name string on success
+     * (which must be freed after use).
+     */
+    char *q = file_path;
+    char *last = NULL;
     size_t len;
     char *p;
 
 #ifdef _WIN32
-    dir_sep = '\\';
+    char dir_sep = '\\';
 #else
-    dir_sep = '/';
+    char dir_sep = '/';
 #endif
+
+    if (file_path == NULL)
+        return NULL;
 
     while (*q != '\0') {
         if (*q == dir_sep)
@@ -192,13 +267,17 @@ char *dirpart(char *path)
         ++q;
     }
 
-    len = last - path;
+    /* No directory separator found */
+    if (last == NULL)
+        return strdup(".");
 
-    /* Overflow is impossible */
+    len = last - file_path;
+
+    /* Overflow is impossible due to the trailing '\0' */
     if ((p = malloc(len + 1)) == NULL)
         return NULL;
 
-    memcpy(p, path, len);
+    memcpy(p, file_path, len);
     *(p + len) = '\0';
 
     return p;
@@ -261,7 +340,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if ((ex_dir = dirpart(*argv)) == NULL)
+    if ((ex_dir = directory_name(*argv)) == NULL)
         return 1;
 
     if ((opt = strdup(*(argv + 1))) == NULL) {
@@ -282,6 +361,11 @@ int main(int argc, char **argv)
         }
         /* Atomic on POSIX */
         if (mv_file("sloth_copy.db", "sloth.db")) {
+            ret = 1;
+            goto clean_up;
+        }
+    } else if (!strcmp(opt, "export")) {
+        if (run_sql(ex_dir, "export.sql")) {
             ret = 1;
             goto clean_up;
         }

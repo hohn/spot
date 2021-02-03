@@ -81,6 +81,14 @@ check(full_name <> ''),
 check(email <> '')
 );
 
+/* Just used for export */
+create table sloth_commit_mark
+(t integer not null unique primary key,
+mk integer not null unique
+);
+
+create unique index uidx_commit_mark_mk on sloth_commit_mark(mk);
+
 delete from sloth_user;
 insert into sloth_user (full_name, email)
 values('Logan McLintock', 'loganpkg@gmail.com');

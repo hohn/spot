@@ -29,26 +29,38 @@ from sloth_blob
 order by bid asc;
 
 
+/* Generate the commit marks */
+delete from sloth_commit_mark;
+
+insert into sloth_commit_mark (t, mk)
+select
+a.t,
+row_number() over (order by a.t asc)
+    + (select max(b.bid) from sloth_blob as b) as mk
+from sloth_commit as a;
+
+
 /* Export the commits */
-/* Need to offset the cid values to make the mark values unique */
 select
 'commit refs/heads/master' || x'0A'
-|| 'mark :' || (a.cid + (select max(c.bid) from sloth_blob as c)) || x'0A'
+|| 'mark :' || c.mk || x'0A'
 || 'author '
     || (select d.full_name || ' <' || d.email || '> ' from sloth_user as d)
     || a.t || ' +0000' || x'0A'
 || 'committer '
-    || (select d.full_name || ' <' || d.email || '> ' from sloth_user as d)
+    || (select e.full_name || ' <' || e.email || '> ' from sloth_user as e)
     || a.t || ' +0000' || x'0A'
 || 'data ' || (length(a.msg) + 1) || x'0A'
 || a.msg || x'0A'
-|| case when a.cid <> 1
-    then 'from :' || (a.cid + (select max(c.bid) from sloth_blob as c) - 1) || x'0A'
+|| case when a.t <> (select min(f.t) from sloth_commit as f)
+    then 'from :' || (c.mk - 1) || x'0A'
     else '' end
 || 'deleteall' || x'0A'
 || group_concat('M 100644 :' || b.bid || ' ' || b.fn, x'0A')
 from sloth_commit as a
 inner join sloth_file as b
-on a.cid = b.cid
-group by a.cid, a.t, a.msg
-order by a.cid asc;
+on a.t >= b.entry_t and a.t < b.exit_t
+inner join sloth_commit_mark as c
+on a.t = c.t
+group by a.t, a.msg
+order by a.t asc;
