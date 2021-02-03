@@ -16,8 +16,7 @@
 
 /* Export SQL for sloth */
 
-/* Stop after first error */
-.bail on
+SQL_OPTS
 
 /* Export the blobs first */
 select

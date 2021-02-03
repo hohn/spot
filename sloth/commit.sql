@@ -17,6 +17,7 @@
 /* sloth commit SQL */
 
 SQL_OPTS
+SQL_DEBUG
 ENTER_BACKUP
 
 /* Will be passed as an arg */

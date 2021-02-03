@@ -17,6 +17,7 @@
 /* Data Definition Language (DDL) for sloth */
 
 SQL_OPTS
+SQL_DEBUG
 
 create table sloth_commit
 (t integer not null unique primary key,
