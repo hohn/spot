@@ -34,6 +34,16 @@ delete from sloth_stage;
 insert into sloth_stage (fn, d)
 select fn, readfile(fn) from sloth_track;
 
+/* Remove problem characters */
+/* Carriage Return, \r, ^M */
+update sloth_stage
+set d = replace(d, X'0D', '');
+
+/* Null character, \0, ^@ */
+update sloth_stage
+set d = replace(d, X'00', '');
+
+
 /* bid will be auto filled */
 insert into sloth_blob (d)
 select a.d from sloth_stage as a
