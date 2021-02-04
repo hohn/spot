@@ -19,6 +19,10 @@
  * C file to glue the SQL together.
  */
 
+#include <sys/types.h>
+#include <sys/stat.h>
+
+
 #ifdef _WIN32
 /* For rand_s */
 #define _CRT_RAND_S
@@ -299,7 +303,7 @@ int sys_cmd(char *cmd)
     return 1;
 }
 
-int run_sql(char *ex_dir, char *script_name)
+int run_sql(char *db_name, char *ex_dir, char *script_name)
 {
     int ret = 0;
     char *sql_path;
@@ -311,7 +315,7 @@ int run_sql(char *ex_dir, char *script_name)
     if ((macro_path = path_join(ex_dir, "macros.m4")) == NULL)
         return 1;
     if ((cmd =
-         concat("m4 ", macro_path, " ", sql_path, " | sqlite3 sloth.db",
+         concat("m4 ", macro_path, " ", sql_path, " | sqlite3 ", db_name,
                 NULL)) == NULL) {
         ret = 1;
         goto clean_up;
@@ -327,6 +331,110 @@ int run_sql(char *ex_dir, char *script_name)
     free(macro_path);
     free(cmd);
     return ret;
+}
+
+int filesize(char *fn, size_t * fs)
+{
+    /* Gets the filesize of a filename */
+    struct stat st;
+    if (stat(fn, &st))
+        return 1;
+    if (!((st.st_mode & S_IFMT) == S_IFREG))
+        return 1;
+    if (st.st_size < 0)
+        return 1;
+    *fs = st.st_size;
+    return 0;
+}
+
+int import_git(char *ex_dir)
+{
+    FILE *fp;
+    size_t fs;
+    char *p = NULL;
+
+    char *hash;
+    char *time;
+    char *msg;
+
+    char *cmd;
+    if (sys_cmd("git log --reverse --pretty=format:%H^%at^%s > .log"))
+        return 1;
+
+    if (filesize(".log", &fs))
+        return 1;
+
+    if (AOF(fs, 1))
+        return 1;
+
+    if ((p = malloc(fs + 1)) == NULL)
+        return 1;
+    *(p + fs) = '\0';
+
+    if ((fp = fopen(".log", "rb")) == NULL) {
+        free(p);
+        return 1;
+    }
+
+    if (fread(p, 1, fs, fp) != fs) {
+        free(p);
+        fclose(fp);
+        return 1;
+    }
+
+    if (fclose(fp)) {
+        free(p);
+        return 1;
+    }
+
+    /* Backup */
+    if (mv_file("sloth.db", "sloth_copy.db")) {
+        free(p);
+        return 1;
+    }
+
+    /* Parse */
+    hash = strtok(p, "^");
+    do {
+        time = strtok(NULL, "^");
+        msg = strtok(NULL, "\n");
+
+        printf("hash: %s\ntime: %s\nmsg: %s\n", hash, time, msg);
+
+        if ((cmd = concat("git checkout ", hash, NULL)) == NULL) {
+            free(p);
+            return 1;
+        }
+
+        if (sys_cmd(cmd)) {
+            free(p);
+            return 1;
+        }
+
+        if (sys_cmd("git ls-files > .track")) {
+            free(p);
+            return 1;
+        }
+
+        if (run_sql("sloth_copy.db", ex_dir, "track.sql")) {
+            free(p);
+            return 1;
+        }
+
+        if (run_sql("sloth_copy.db", ex_dir, "commit.sql")) {
+            free(p);
+            return 1;
+        }
+    } while ((hash = strtok(p, "^")) != NULL);
+
+    free(p);
+    free(cmd);
+
+    /* Atomic on POSIX */
+    if (mv_file("sloth_copy.db", "sloth.db"))
+        return 1;
+
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -349,13 +457,30 @@ int main(int argc, char **argv)
     }
 
     if (!strcmp(opt, "init")) {
-        if (run_sql(ex_dir, "ddl.sql")) {
+        if (run_sql("sloth.db", ex_dir, "ddl.sql")) {
             ret = 1;
             goto clean_up;
         }
-
     } else if (!strcmp(opt, "commit")) {
-        if (run_sql(ex_dir, "commit.sql")) {
+        if (mv_file("sloth.db", "sloth_copy.db")) {
+            ret = 1;
+            goto clean_up;
+        }
+        if (run_sql("sloth_copy.db", ex_dir, "commit.sql")) {
+            ret = 1;
+            goto clean_up;
+        }
+        /* Atomic on POSIX */
+        if (mv_file("sloth_copy.db", "sloth.db")) {
+            ret = 1;
+            goto clean_up;
+        }
+    } else if (!strcmp(opt, "track")) {
+        if (mv_file("sloth.db", "sloth_copy.db")) {
+            ret = 1;
+            goto clean_up;
+        }
+        if (run_sql("sloth_copy.db", ex_dir, "track.sql")) {
             ret = 1;
             goto clean_up;
         }
@@ -365,7 +490,12 @@ int main(int argc, char **argv)
             goto clean_up;
         }
     } else if (!strcmp(opt, "export")) {
-        if (run_sql(ex_dir, "export.sql")) {
+        if (run_sql("sloth.db", ex_dir, "export.sql")) {
+            ret = 1;
+            goto clean_up;
+        }
+    } else if (!strcmp(opt, "import")) {
+        if (import_git(ex_dir)) {
             ret = 1;
             goto clean_up;
         }

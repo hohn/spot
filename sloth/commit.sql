@@ -18,16 +18,10 @@
 
 SQL_OPTS
 SQL_DEBUG
-ENTER_BACKUP
 
 /* Will be passed as an arg */
 delete from sloth_tmp_msg;
 insert into sloth_tmp_msg (msg) values('save');
-
-/* Test files */
-delete from sloth_track;
-insert into sloth_track (fn) values ('mouse');
-insert into sloth_track (fn) values ('dog');
 
 delete from sloth_stage;
 

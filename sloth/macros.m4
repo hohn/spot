@@ -15,8 +15,4 @@ define(SQL_DEBUG,
 .expert
 .headers on])
 
-define(ENTER_BACKUP,
-[.backup sloth_copy.db
-.open sloth_copy.db])
-
 divert
