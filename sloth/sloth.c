@@ -114,6 +114,67 @@ char *random_alnum_str(size_t len)
     return p;
 }
 
+int filesize(char *fn, size_t * fs)
+{
+    /* Gets the filesize of a filename */
+    struct stat st;
+    if (stat(fn, &st))
+        return 1;
+    if (!((st.st_mode & S_IFMT) == S_IFREG))
+        return 1;
+    if (st.st_size < 0)
+        return 1;
+    *fs = st.st_size;
+    return 0;
+}
+
+int cp_file(char *from_file, char *to_file)
+{
+    FILE *fp_from;
+    FILE *fp_to;
+    size_t fs;
+    char *p;
+
+    if (filesize(from_file, &fs))
+        return 1;
+
+    if ((p = malloc(fs)) == NULL)
+        return 1;
+
+    if ((fp_from = fopen(from_file, "rb")) == NULL) {
+        free(p);
+        return 1;
+    }
+
+    if (fread(p, 1, fs, fp_from) != fs) {
+        free(p);
+        fclose(fp_from);
+        return 1;
+    }
+
+    if (fclose(fp_from)) {
+        free(p);
+        return 1;
+    }
+
+    if ((fp_to = fopen(to_file, "wb")) == NULL) {
+        free(p);
+        return 1;
+    }
+
+    if (fwrite(p, 1, fs, fp_to) != fs) {
+        free(p);
+        return 1;
+    }
+
+    free(p);
+
+    if (fclose(fp_to))
+        return 1;
+
+    return 0;
+}
+
 int mv_file(char *from_file, char *to_file)
 {
 #ifdef _WIN32
@@ -333,17 +394,56 @@ int run_sql(char *db_name, char *ex_dir, char *script_name)
     return ret;
 }
 
-int filesize(char *fn, size_t * fs)
+int sloth_commit(char *ex_dir, char *msg, char *time, int backup)
 {
-    /* Gets the filesize of a filename */
-    struct stat st;
-    if (stat(fn, &st))
+    char *cmd;
+
+    if (backup) {
+        if (cp_file("sloth.db", "sloth_copy.db"))
+            return 1;
+    }
+
+    if ((cmd =
+         concat("sqlite3 sloth_copy.db \"delete from sloth_tmp_msg; ",
+                "insert into sloth_tmp_msg (msg) values (\'", msg,
+                "\');\"", NULL)) == NULL)
         return 1;
-    if (!((st.st_mode & S_IFMT) == S_IFREG))
+
+    if (sys_cmd(cmd)) {
+        free(cmd);
         return 1;
-    if (st.st_size < 0)
+    }
+    free(cmd);
+
+    if (sys_cmd("sqlite3 sloth_copy.db \"delete from sloth_tmp_t;\""))
         return 1;
-    *fs = st.st_size;
+
+    if (time == NULL) {
+        if (sys_cmd("sqlite3 sloth_copy.db \"insert into sloth_tmp_t (t) "
+                    "select strftime(\'%s\',\'now\');\""))
+            return 1;
+    } else {
+        if ((cmd = concat("sqlite3 sloth_copy.db ",
+                          "\"insert into sloth_tmp_t (t) values (\'", time,
+                          "\');\"", NULL)) == NULL)
+            return 1;
+
+        if (sys_cmd(cmd)) {
+            free(cmd);
+            return 1;
+        }
+        free(cmd);
+    }
+
+    if (run_sql("sloth_copy.db", ex_dir, "commit.sql"))
+        return 1;
+
+    if (backup) {
+        /* Atomic on POSIX */
+        if (mv_file("sloth_copy.db", "sloth.db"))
+            return 1;
+    }
+
     return 0;
 }
 
@@ -388,16 +488,16 @@ int import_git(char *ex_dir)
     }
 
     /* Backup */
-    if (mv_file("sloth.db", "sloth_copy.db")) {
+    if (cp_file("sloth.db", "sloth_copy.db")) {
         free(p);
         return 1;
     }
 
     /* Parse */
-    hash = strtok(p, "^");
+    hash = strtok(p, "^\n");
     do {
-        time = strtok(NULL, "^");
-        msg = strtok(NULL, "\n");
+        time = strtok(NULL, "^\n");
+        msg = strtok(NULL, "^\n");
 
         printf("hash: %s\ntime: %s\nmsg: %s\n", hash, time, msg);
 
@@ -416,16 +516,11 @@ int import_git(char *ex_dir)
             return 1;
         }
 
-        if (run_sql("sloth_copy.db", ex_dir, "track.sql")) {
+        if (sloth_commit(ex_dir, msg, time, 0)) {
             free(p);
             return 1;
         }
-
-        if (run_sql("sloth_copy.db", ex_dir, "commit.sql")) {
-            free(p);
-            return 1;
-        }
-    } while ((hash = strtok(p, "^")) != NULL);
+    } while ((hash = strtok(NULL, "^\n")) != NULL);
 
     free(p);
     free(cmd);
@@ -437,19 +532,31 @@ int import_git(char *ex_dir)
     return 0;
 }
 
+void print_usage(char *prgm_name)
+{
+    fprintf(stderr, "Usage: %s init|import|export\n"
+            "%s commit msg [time]\n", prgm_name, prgm_name);
+}
+
 int main(int argc, char **argv)
 {
     int ret = 0;
+    char *prgm_name;
     char *ex_dir;
     char *opt = NULL;
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s help\n", *argv);
+        print_usage(*argv);
         return 1;
     }
 
-    if ((ex_dir = directory_name(*argv)) == NULL)
+    if ((prgm_name = strdup(*argv)) == NULL)
         return 1;
+
+    if ((ex_dir = directory_name(prgm_name)) == NULL) {
+        ret = 1;
+        goto clean_up;
+    }
 
     if ((opt = strdup(*(argv + 1))) == NULL) {
         ret = 1;
@@ -462,30 +569,18 @@ int main(int argc, char **argv)
             goto clean_up;
         }
     } else if (!strcmp(opt, "commit")) {
-        if (mv_file("sloth.db", "sloth_copy.db")) {
-            ret = 1;
-            goto clean_up;
-        }
-        if (run_sql("sloth_copy.db", ex_dir, "commit.sql")) {
-            ret = 1;
-            goto clean_up;
-        }
-        /* Atomic on POSIX */
-        if (mv_file("sloth_copy.db", "sloth.db")) {
-            ret = 1;
-            goto clean_up;
-        }
-    } else if (!strcmp(opt, "track")) {
-        if (mv_file("sloth.db", "sloth_copy.db")) {
-            ret = 1;
-            goto clean_up;
-        }
-        if (run_sql("sloth_copy.db", ex_dir, "track.sql")) {
-            ret = 1;
-            goto clean_up;
-        }
-        /* Atomic on POSIX */
-        if (mv_file("sloth_copy.db", "sloth.db")) {
+        if (argc == 3) {
+            if (sloth_commit(ex_dir, *(argv + 2), NULL, 1)) {
+                ret = 1;
+                goto clean_up;
+            }
+        } else if (argc == 4) {
+            if (sloth_commit(ex_dir, *(argv + 2), *(argv + 3), 1)) {
+                ret = 1;
+                goto clean_up;
+            }
+        } else {
+            print_usage(prgm_name);
             ret = 1;
             goto clean_up;
         }
@@ -500,12 +595,13 @@ int main(int argc, char **argv)
             goto clean_up;
         }
     } else {
-        fprintf(stderr, "%s: Invalid option: %s\n", *argv, opt);
+        print_usage(prgm_name);
         ret = 1;
         goto clean_up;
     }
 
   clean_up:
+    free(prgm_name);
     free(ex_dir);
     free(opt);
 

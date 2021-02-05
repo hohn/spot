@@ -19,16 +19,18 @@
 SQL_OPTS
 SQL_DEBUG
 
-/* Will be passed as an arg */
-delete from sloth_tmp_msg;
-insert into sloth_tmp_msg (msg) values('save');
+/* Set files to track */
+delete from sloth_track;
 
+.import .track sloth_track
+
+/* Import files */
 delete from sloth_stage;
 
 insert into sloth_stage (fn, d)
 select fn, readfile(fn) from sloth_track;
 
-/* Remove problem characters */
+/* Clean files: Remove problem characters */
 /* Carriage Return, \r, ^M */
 update sloth_stage
 set d = replace(d, X'0D', '');
@@ -37,12 +39,12 @@ set d = replace(d, X'0D', '');
 update sloth_stage
 set d = replace(d, X'00', '');
 
-
 /* bid will be auto filled */
 insert into sloth_blob (d)
 select a.d from sloth_stage as a
 where a.d not in (select b.d from sloth_blob as b);
 
+/* Clamp the files */
 delete from sloth_stage_clamp;
 
 insert into sloth_stage_clamp
@@ -54,11 +56,6 @@ inner join sloth_blob as b
 on a.d = b.d
 ;
 
-delete from sloth_tmp_t;
-
-insert into sloth_tmp_t (t)
-select strftime('%s','now');
-
 delete from sloth_tmp_trap;
 
 /* Will create an error if there is an old time greater than the current time */
@@ -68,11 +65,13 @@ count(a.t)
 from sloth_commit as a
 where a.t > (select b.t from sloth_tmp_t as b);
 
+/* Record the time of the last commit before this one in progress */
 delete from sloth_prev_t;
 
 insert into sloth_prev_t (t)
 select max(t) from sloth_commit;
 
+/* Fill in commit info */
 insert into sloth_commit (t, msg)
 select
 (select b.t from sloth_tmp_t as b),

@@ -92,7 +92,7 @@ create unique index uidx_commit_mark_mk on sloth_commit_mark(mk);
 
 delete from sloth_user;
 insert into sloth_user (full_name, email)
-values('Logan McLintock', 'loganpkg@gmail.com');
+values ('Logan McLintock', 'loganpkg@gmail.com');
 
 /* Only one zero is accepted */
 create table sloth_tmp_trap
