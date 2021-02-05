@@ -534,7 +534,7 @@ int import_git(char *ex_dir)
 
 void print_usage(char *prgm_name)
 {
-    fprintf(stderr, "Usage: %s init|import|export\n"
+    fprintf(stderr, "Usage: %s init|log|import|export\n"
             "%s commit msg [time]\n", prgm_name, prgm_name);
 }
 
@@ -565,6 +565,11 @@ int main(int argc, char **argv)
 
     if (!strcmp(opt, "init")) {
         if (run_sql("sloth.db", ex_dir, "ddl.sql")) {
+            ret = 1;
+            goto clean_up;
+        }
+    } else if (!strcmp(opt, "log")) {
+        if (run_sql("sloth.db", ex_dir, "log.sql")) {
             ret = 1;
             goto clean_up;
         }
