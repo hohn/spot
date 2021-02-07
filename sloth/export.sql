@@ -18,6 +18,11 @@
 
 SQL_OPTS
 
+/* Set user info from file */
+delete from sloth_user;
+.import .user sloth_user
+
+
 /* Export the blobs first */
 select
 'blob' || x'0A'

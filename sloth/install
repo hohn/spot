@@ -1,0 +1,6 @@
+#!/bin/sh
+
+cc -O3 -o sloth sloth.c
+cp -p sloth "$HOME"/bin/
+cp -p *.sql "$HOME"/bin/
+cp -P *.m4 "$HOME"/bin/

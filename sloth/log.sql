@@ -18,6 +18,11 @@
 
 SQL_OPTS
 
-select datetime(t, 'unixepoch', 'localtime'), msg from sloth_commit;
+select
+datetime(t, 'unixepoch', 'localtime'),
+msg
+from sloth_commit
+order by
+t desc;
 
 .quit

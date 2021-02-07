@@ -39,6 +39,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Set to the the directory where sloth is installed.
+ * The SQL scripts and m4 script must also be in this
+ * same directory.
+ */
+#define EX_DIR "/home/logan/bin"
+
 #define STR_BLOCK 512
 
 #define AOF(a, b) ((a) > SIZE_MAX - (b))
@@ -553,7 +560,7 @@ int main(int argc, char **argv)
     if ((prgm_name = strdup(*argv)) == NULL)
         return 1;
 
-    if ((ex_dir = directory_name(prgm_name)) == NULL) {
+    if ((ex_dir = strdup(EX_DIR)) == NULL) {
         ret = 1;
         goto clean_up;
     }
