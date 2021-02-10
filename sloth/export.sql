@@ -22,15 +22,26 @@ SQL_OPTS
 delete from sloth_user;
 .import .user sloth_user
 
+/* Generate the blobs marks */
+delete from sloth_blob_mark;
+
+insert into sloth_blob_mark (h, mk)
+select
+h,
+row_number() over (order by h asc) as mk
+from sloth_blob;
+
 
 /* Export the blobs first */
 select
 'blob' || x'0A'
-|| 'mark :' || bid || x'0A'
-|| 'data ' || length(d) || x'0A'
-|| d
-from sloth_blob
-order by bid asc;
+|| 'mark :' || b.mk || x'0A'
+|| 'data ' || length(a.d) || x'0A'
+|| a.d
+from sloth_blob as a
+inner join sloth_blob_mark as b
+on a.h = b.h
+order by b.mk asc;
 
 
 /* Generate the commit marks */
@@ -40,7 +51,7 @@ insert into sloth_commit_mark (t, mk)
 select
 a.t,
 row_number() over (order by a.t asc)
-    + (select max(b.bid) from sloth_blob as b) as mk
+    + (select max(b.mk) from sloth_blob_mark as b) as mk
 from sloth_commit as a;
 
 
@@ -60,11 +71,13 @@ select
     then 'from :' || (c.mk - 1) || x'0A'
     else '' end
 || 'deleteall' || x'0A'
-|| group_concat('M 100644 :' || b.bid || ' ' || b.fn, x'0A')
+|| group_concat('M 100644 :' || d.mk || ' ' || b.fn, x'0A')
 from sloth_commit as a
 inner join sloth_file as b
 on a.t >= b.entry_t and a.t < b.exit_t
 inner join sloth_commit_mark as c
 on a.t = c.t
+inner join sloth_blob_mark as d
+on b.h = d.h
 group by a.t, a.msg
 order by a.t asc;

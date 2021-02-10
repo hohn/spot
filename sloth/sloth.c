@@ -463,6 +463,7 @@ int import_git(char *ex_dir)
     char *hash;
     char *time;
     char *msg;
+    char *q;
 
     char *cmd;
     if (sys_cmd("git log --reverse --pretty=format:%H^%at^%s > .log"))
@@ -505,6 +506,14 @@ int import_git(char *ex_dir)
     do {
         time = strtok(NULL, "^\n");
         msg = strtok(NULL, "^\n");
+
+        /* Clean msg */
+        q = msg;
+        while (*q != '\0') {
+            if (*q == '\'')
+                *q = ' ';
+            ++q;
+        }
 
         printf("hash: %s\ntime: %s\nmsg: %s\n", hash, time, msg);
 

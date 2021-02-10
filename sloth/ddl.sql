@@ -26,7 +26,7 @@ check(msg <> '')
 );
 
 create table sloth_blob
-(bid integer not null unique primary key,
+(h text not null unique primary key,
 d blob not null unique
 );
 
@@ -34,14 +34,14 @@ create unique index uidx_blob_data on sloth_blob(d);
 
 create table sloth_file
 (fn text not null,
-bid integer not null,
+h text not null,
 entry_t integer not null, /* Inclusive */
 exit_t integer not null, /* Exclusive */
 check(fn <> '')
 );
 
 /* Probably need some time index */
-create index idx_file_bid on sloth_file(bid);
+create index idx_file_h on sloth_file(h);
 
 create table sloth_track
 (fn text not null unique primary key,
@@ -56,7 +56,7 @@ check(fn <> '')
 
 create table sloth_stage_clamp
 (fn text not null unique primary key,
-bid integer not null unique,
+h text not null unique,
 check(fn <> '')
 );
 
@@ -83,6 +83,14 @@ check(email <> '')
 );
 
 /* Just used for export */
+create table sloth_blob_mark
+(h text not null unique primary key,
+mk integer not null unique
+);
+
+create unique index uidx_blob_mark_mk on sloth_blob_mark(mk);
+
+/* Just used for export */
 create table sloth_commit_mark
 (t integer not null unique primary key,
 mk integer not null unique
@@ -90,8 +98,9 @@ mk integer not null unique
 
 create unique index uidx_commit_mark_mk on sloth_commit_mark(mk);
 
+
 /* Only one zero is accepted */
-create table sloth_tmp_trap
+create table sloth_non_zero_trap
 (x integer not null unique,
 check (x = 0)
 );
