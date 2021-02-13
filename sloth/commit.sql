@@ -65,7 +65,7 @@ insert into sloth_non_zero_trap
 select
 count(a.t)
 from sloth_commit as a
-where a.t > (select b.t from sloth_tmp_t as b);
+where a.t > (select b.i from sloth_tmp_int as b);
 
 /* Record the time of the last commit before this one in progress */
 delete from sloth_prev_t;
@@ -76,17 +76,17 @@ select max(t) from sloth_commit;
 /* Fill in commit info */
 insert into sloth_commit (t, msg)
 select
-(select b.t from sloth_tmp_t as b),
-(select trim(c.msg) from sloth_tmp_msg as c)
+(select b.i from sloth_tmp_int as b),
+(select trim(c.x) from sloth_tmp_text as c)
 ;
 
 /* Close off open records that are now gone (not staged) */
 update sloth_file
-set exit_t = (select b.t from sloth_tmp_t as b)
+set exit_t = (select b.i from sloth_tmp_int as b)
 where
 /* Record is open */
-(select c.t from sloth_tmp_t as c) >= entry_t
-and (select d.t from sloth_tmp_t as d) < exit_t
+(select c.i from sloth_tmp_int as c) >= entry_t
+and (select d.i from sloth_tmp_int as d) < exit_t
 /* Record now gone */
 and (fn, h) not in
 (select
@@ -104,8 +104,8 @@ b.h
 from sloth_file as b
 where
 /* Record is open */
-(select c.t from sloth_tmp_t as c) >= b.entry_t
-and (select d.t from sloth_tmp_t as d) < b.exit_t
+(select c.i from sloth_tmp_int as c) >= b.entry_t
+and (select d.i from sloth_tmp_int as d) < b.exit_t
 );
 
 /* Insert new records */
@@ -113,7 +113,7 @@ insert into sloth_file (fn, h, entry_t, exit_t)
 select
 a.fn,
 a.h,
-(select b.t from sloth_tmp_t as b),
+(select b.i from sloth_tmp_int as b),
 /* Will not overflow if timezone is added */
 strftime('%s', '9999-12-31 00:00:00')
 from sloth_stage_clamp as a
@@ -127,8 +127,8 @@ select z.count_now = z.count_prev and z.count_now = z.count_union
 from
 (select
     (select count(w.h) from sloth_file as w
-        where (select a.t from sloth_tmp_t as a) >= w.entry_t
-          and (select b.t from sloth_tmp_t as b) <  w.exit_t
+        where (select a.i from sloth_tmp_int as a) >= w.entry_t
+          and (select b.i from sloth_tmp_int as b) <  w.exit_t
     ) as count_now,
 
     (select count(x.h) from sloth_file as x
@@ -138,8 +138,8 @@ from
 
     (select count(y.h) from
         (select q.h, q.fn from sloth_file as q
-            where (select e.t from sloth_tmp_t as e) >= q.entry_t
-              and (select f.t from sloth_tmp_t as f) <  q.exit_t
+            where (select e.i from sloth_tmp_int as e) >= q.entry_t
+              and (select f.i from sloth_tmp_int as f) <  q.exit_t
         union
         select r.h, r.fn from sloth_file as r
             where (select g.t from sloth_prev_t as g) >= r.entry_t

@@ -411,8 +411,8 @@ int sloth_commit(char *ex_dir, char *msg, char *time, int backup)
     }
 
     if ((cmd =
-         concat("sqlite3 sloth_copy.db \"delete from sloth_tmp_msg; ",
-                "insert into sloth_tmp_msg (msg) values (\'", msg,
+         concat("sqlite3 sloth_copy.db \"delete from sloth_tmp_text; ",
+                "insert into sloth_tmp_text (x) values (\'", msg,
                 "\');\"", NULL)) == NULL)
         return 1;
 
@@ -422,17 +422,18 @@ int sloth_commit(char *ex_dir, char *msg, char *time, int backup)
     }
     free(cmd);
 
-    if (sys_cmd("sqlite3 sloth_copy.db \"delete from sloth_tmp_t;\""))
+    if (sys_cmd("sqlite3 sloth_copy.db \"delete from sloth_tmp_int;\""))
         return 1;
 
     if (time == NULL) {
-        if (sys_cmd("sqlite3 sloth_copy.db \"insert into sloth_tmp_t (t) "
-                    "select strftime(\'%s\',\'now\');\""))
+        if (sys_cmd
+            ("sqlite3 sloth_copy.db \"insert into sloth_tmp_int (i) "
+             "select strftime(\'%s\',\'now\');\""))
             return 1;
     } else {
         if ((cmd = concat("sqlite3 sloth_copy.db ",
-                          "\"insert into sloth_tmp_t (t) values (\'", time,
-                          "\');\"", NULL)) == NULL)
+                          "\"insert into sloth_tmp_int (i) values (\'",
+                          time, "\');\"", NULL)) == NULL)
             return 1;
 
         if (sys_cmd(cmd)) {
@@ -454,6 +455,20 @@ int sloth_commit(char *ex_dir, char *msg, char *time, int backup)
     return 0;
 }
 
+void swap_ch(char *str, char old, char new)
+{
+    /*
+     * Replaces all old chars in a string str with new chars.
+     * str must be non-static.
+     */
+    char *q = str;
+    while (*q != '\0') {
+        if (*q == old)
+            *q = new;
+        ++q;
+    }
+}
+
 int import_git(char *ex_dir)
 {
     FILE *fp;
@@ -463,7 +478,6 @@ int import_git(char *ex_dir)
     char *hash;
     char *time;
     char *msg;
-    char *q;
 
     char *cmd;
     if (sys_cmd("git log --reverse --pretty=format:%H^%at^%s > .log"))
@@ -508,12 +522,7 @@ int import_git(char *ex_dir)
         msg = strtok(NULL, "^\n");
 
         /* Clean msg */
-        q = msg;
-        while (*q != '\0') {
-            if (*q == '\'')
-                *q = ' ';
-            ++q;
-        }
+        swap_ch(msg, '\'', ' ');
 
         printf("hash: %s\ntime: %s\nmsg: %s\n", hash, time, msg);
 
@@ -550,7 +559,7 @@ int import_git(char *ex_dir)
 
 void print_usage(char *prgm_name)
 {
-    fprintf(stderr, "Usage: %s init|log|import|export\n"
+    fprintf(stderr, "Usage: %s init|log|import|export|subdir|combine\n"
             "%s commit msg [time]\n", prgm_name, prgm_name);
 }
 
@@ -560,6 +569,8 @@ int main(int argc, char **argv)
     char *prgm_name;
     char *ex_dir;
     char *opt = NULL;
+    char *subdir = NULL;
+    char *cmd = NULL;
 
     if (argc < 2) {
         print_usage(*argv);
@@ -615,6 +626,46 @@ int main(int argc, char **argv)
             ret = 1;
             goto clean_up;
         }
+    } else if (!strcmp(opt, "subdir")) {
+        if (argc != 3) {
+            print_usage(prgm_name);
+            ret = 1;
+            goto clean_up;
+        }
+
+        /* Backup */
+        if (cp_file("sloth.db", "sloth_copy.db")) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        if ((subdir = strdup(*(argv + 2))) == NULL) {
+            ret = 1;
+            goto clean_up;
+        }
+        swap_ch(subdir, '\'', ' ');
+
+        if ((cmd =
+             concat("sqlite3 sloth_copy.db \"delete from sloth_tmp_text; ",
+                    "insert into sloth_tmp_text (x) values (\'", subdir,
+                    "\');\"", NULL)) == NULL)
+            return 1;
+
+        if (sys_cmd(cmd)) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        if (run_sql("sloth_copy.db", ex_dir, "subdir.sql")) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        /* Atomic on POSIX */
+        if (mv_file("sloth_copy.db", "sloth.db")) {
+            ret = 1;
+            goto clean_up;
+        }
     } else {
         print_usage(prgm_name);
         ret = 1;
@@ -625,6 +676,8 @@ int main(int argc, char **argv)
     free(prgm_name);
     free(ex_dir);
     free(opt);
+    free(subdir);
+    free(cmd);
 
     return ret;
 }

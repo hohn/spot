@@ -3,6 +3,9 @@ changequote([, ])
 
 define(LIB_DIR, [/home/logan/lib])
 
+define(DIR_SEP,
+[/])
+
 define(SQL_OPTS,
 [.bail on
 .binary on

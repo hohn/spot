@@ -60,18 +60,9 @@ h text not null unique,
 check(fn <> '')
 );
 
-create table sloth_tmp_t
-(t integer not null unique primary key
-);
-
 /* Time of the previous commit */
 create table sloth_prev_t
 (t integer not null unique primary key
-);
-
-create table sloth_tmp_msg
-(msg text not null unique primary key,
-check(msg <> '')
 );
 
 /* Just used for export */
@@ -98,6 +89,14 @@ mk integer not null unique
 
 create unique index uidx_commit_mark_mk on sloth_commit_mark(mk);
 
+create table sloth_tmp_int
+(i integer not null unique primary key
+);
+
+create table sloth_tmp_text
+(x text not null unique primary key,
+check(x <> '')
+);
 
 /* Only one zero is accepted */
 create table sloth_non_zero_trap
