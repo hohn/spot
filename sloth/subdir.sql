@@ -17,7 +17,6 @@
 /* sloth subdir SQL */
 
 SQL_OPTS
-SQL_DEBUG
 
 update sloth_file
 set fn = (select trim(a.x) from sloth_tmp_text as a) || 'DIR_SEP' || fn;

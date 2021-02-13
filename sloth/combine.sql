@@ -24,8 +24,6 @@ select 'attach database ''' || (select a.x from sloth_tmp_text as a) || ''' as o
 .output
 .read .tmp
 
-SQL_DEBUG
-
 /* Make sure there are no conflicting file paths */
 delete from main.sloth_non_zero_trap;
 
