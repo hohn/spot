@@ -559,8 +559,10 @@ int import_git(char *ex_dir)
 
 void print_usage(char *prgm_name)
 {
-    fprintf(stderr, "Usage: %s init|log|import|export|subdir|combine\n"
-            "%s commit msg [time]\n", prgm_name, prgm_name);
+    fprintf(stderr, "Usage: %1$s init|log|import|export|combine\n"
+            "%1$s subdir prefix_directory_name\n"
+            "%1$s combine path_to_other_sloth.db\n"
+            "%1$s commit msg [time]\n", prgm_name);
 }
 
 int main(int argc, char **argv)
@@ -570,6 +572,7 @@ int main(int argc, char **argv)
     char *ex_dir;
     char *opt = NULL;
     char *subdir = NULL;
+    char *other_sloth_path = NULL;
     char *cmd = NULL;
 
     if (argc < 2) {
@@ -666,6 +669,45 @@ int main(int argc, char **argv)
             ret = 1;
             goto clean_up;
         }
+    } else if (!strcmp(opt, "combine")) {
+        if (argc != 3) {
+            print_usage(prgm_name);
+            ret = 1;
+            goto clean_up;
+        }
+
+        /* Backup */
+        if (cp_file("sloth.db", "sloth_copy.db")) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        if ((other_sloth_path = strdup(*(argv + 2))) == NULL) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        if ((cmd =
+             concat("sqlite3 sloth_copy.db \"delete from sloth_tmp_text; ",
+                    "insert into sloth_tmp_text (x) values (\'",
+                    other_sloth_path, "\');\"", NULL)) == NULL)
+            return 1;
+
+        if (sys_cmd(cmd)) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        if (run_sql("sloth_copy.db", ex_dir, "combine.sql")) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        /* Atomic on POSIX */
+        if (mv_file("sloth_copy.db", "sloth.db")) {
+            ret = 1;
+            goto clean_up;
+        }
     } else {
         print_usage(prgm_name);
         ret = 1;
@@ -677,6 +719,7 @@ int main(int argc, char **argv)
     free(ex_dir);
     free(opt);
     free(subdir);
+    free(other_sloth_path);
     free(cmd);
 
     return ret;

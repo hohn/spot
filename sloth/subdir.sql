@@ -25,4 +25,16 @@ set fn = (select trim(a.x) from sloth_tmp_text as a) || 'DIR_SEP' || fn;
 update sloth_commit
 set msg = (select trim(a.x) from sloth_tmp_text as a) || ': ' || msg;
 
+/*
+ * The .track file is only read during a commit operation, so changes made
+ * without a sucessful commit will be discarded.
+ */
+update sloth_track
+set fn = (select trim(a.x) from sloth_tmp_text as a) || 'DIR_SEP' || fn;
+
+/* Write .track file. This is not atomic but it is external to the database. */
+.output .track
+select fn from sloth_track;
+.output
+
 .quit
