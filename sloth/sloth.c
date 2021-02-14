@@ -246,49 +246,63 @@ int filesize(char *fn, size_t * fs)
 
 int cp_file(char *from_file, char *to_file)
 {
-    FILE *fp_from;
-    FILE *fp_to;
-    size_t fs;
+    int ret = 0;
+    FILE *fp_from = NULL;
+    FILE *fp_to = NULL;
+    size_t fs, whole_blocks, part_block_size;
     char *p;
 
     if (filesize(from_file, &fs))
         return 1;
 
-    if ((p = malloc(fs)) == NULL)
+    if ((p = malloc(fs > BUFSIZ ? BUFSIZ : fs)) == NULL)
         return 1;
 
     if ((fp_from = fopen(from_file, "rb")) == NULL) {
-        free(p);
-        return 1;
-    }
-
-    if (fread(p, 1, fs, fp_from) != fs) {
-        free(p);
-        fclose(fp_from);
-        return 1;
-    }
-
-    if (fclose(fp_from)) {
-        free(p);
-        return 1;
+        ret = 1;
+        goto clean_up;
     }
 
     if ((fp_to = fopen(to_file, "wb")) == NULL) {
-        free(p);
-        return 1;
+        ret = 1;
+        goto clean_up;
     }
 
-    if (fwrite(p, 1, fs, fp_to) != fs) {
-        free(p);
-        return 1;
+    whole_blocks = fs / BUFSIZ;
+
+    while (whole_blocks) {
+        if (fread(p, 1, BUFSIZ, fp_from) != BUFSIZ) {
+            ret = 1;
+            goto clean_up;
+        }
+        if (fwrite(p, 1, BUFSIZ, fp_to) != BUFSIZ) {
+            ret = 1;
+            goto clean_up;
+        }
+        --whole_blocks;
     }
 
+    part_block_size = fs % BUFSIZ;
+
+    if (part_block_size) {
+        if (fread(p, 1, part_block_size, fp_from) != part_block_size) {
+            ret = 1;
+            goto clean_up;
+        }
+        if (fwrite(p, 1, part_block_size, fp_to) != part_block_size) {
+            ret = 1;
+            goto clean_up;
+        }
+    }
+
+  clean_up:
     free(p);
-
+    if (fclose(fp_from))
+        ret = 1;
     if (fclose(fp_to))
-        return 1;
+        ret = 1;
 
-    return 0;
+    return ret;
 }
 
 int mv_file(char *from_file, char *to_file)
