@@ -19,10 +19,7 @@
 SQL_OPTS
 
 /* Attach other database */
-.output .tmp
-select 'attach database ''' || (select a.x from sloth_tmp_text as a) || ''' as other;';
-.output
-.read .tmp
+attach database (select a.x from sloth_tmp_text as a) as other;
 
 /* Make sure there are no conflicting file paths */
 delete from main.sloth_non_zero_trap;

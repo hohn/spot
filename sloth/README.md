@@ -35,7 +35,9 @@ Synopsis
 To use `sloth` the synopsis is:
 
 ```
-sloth init|log|import|export
+sloth init|log|diff|import|export|combine
+sloth subdir prefix_directory_name
+sloth combine path_to_other_sloth.db
 sloth commit msg [time]
 ```
 

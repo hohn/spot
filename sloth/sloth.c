@@ -44,7 +44,8 @@
  * The SQL scripts and m4 script must also be in this
  * same directory.
  */
-#define EX_DIR "/home/logan/bin"
+#define SCRIPT_DIR "/home/logan/bin"
+#define TMP_IN_DIR "/tmp"
 
 #define STR_BLOCK 512
 
@@ -53,6 +54,10 @@
 
 char *random_alnum_str(size_t len)
 {
+    /*
+     * Returns a random alphanumeric string of length len.
+     * Must free after use. Returns NULL upon failure.
+     */
     char *p;
     unsigned char *t, u;
     size_t i, j;
@@ -119,6 +124,110 @@ char *random_alnum_str(size_t len)
 #endif
 
     return p;
+}
+
+char *concat(char *str1, ...)
+{
+/*
+ * Concatenate multiple strings. Last argument must be NULL.
+ * Returns NULL on error or a pointer to the concatenated string on success.
+ * Must free the concatenated string after use.
+ */
+    int err = 0;
+    va_list arg_p;
+    char *str;
+    size_t len;
+    char *p;                    /* Buffer pointer */
+    char *t;                    /* Temporary buffer pointer */
+    size_t u = 0;               /* Used memory */
+    size_t s;                   /* Total memory size */
+    size_t n;                   /* Temporary new size */
+
+    if ((p = malloc(STR_BLOCK)) == NULL)
+        return NULL;
+
+    s = STR_BLOCK;
+
+    va_start(arg_p, str1);
+    str = str1;
+    while (str != NULL) {
+        len = strlen(str);
+
+        /* Need to save space for terminating \0 char */
+        if (len >= s - u) {
+            /* Grow buffer */
+            if (AOF(len, 1)) {
+                err = 1;
+                goto clean_up;
+            }
+            n = len + 1 - (s - u);
+            if (AOF(s, n)) {
+                err = 1;
+                goto clean_up;
+            }
+            n += s;
+            if (MOF(n, 2)) {
+                err = 1;
+                goto clean_up;
+            }
+            n *= 2;
+            if ((t = realloc(p, n)) == NULL) {
+                err = 1;
+                goto clean_up;
+            }
+            p = t;
+            s = n;
+        }
+        memcpy(p + u, str, len);
+        u += len;
+
+        str = va_arg(arg_p, char *);
+    }
+
+    *(p + u) = '\0';
+
+  clean_up:
+    va_end(arg_p);
+
+    if (err) {
+        free(p);
+        return NULL;
+    }
+
+    return p;
+}
+
+char *make_tmp_dir(char *in_dir)
+{
+    /*
+     * Creates a temporary directory under in_dir.
+     * Need to free after use. Returns NULL on failure.
+     */
+    char *name;
+    char *path;
+    size_t try = 10;            /* Try 10 times */
+    char *dir_sep_str;
+#ifdef _WIN32
+    dir_sep_str = "\\";
+#else
+    dir_sep_str = "/";
+#endif
+
+    while (try--) {
+        if ((name = random_alnum_str(36)) == NULL)
+            return NULL;
+        if ((path = concat(in_dir, dir_sep_str, name, NULL)) == NULL) {
+            free(name);
+            return NULL;
+        }
+        free(name);
+        if (mkdir(path, 0777)) {
+            free(path);
+        } else {
+            return path;
+        }
+    }
+    return NULL;
 }
 
 int filesize(char *fn, size_t * fs)
@@ -196,78 +305,6 @@ int mv_file(char *from_file, char *to_file)
         return 1;
 #endif
     return 0;
-}
-
-
-char *concat(char *str1, ...)
-{
-/*
- * Concatenate multiple strings. Last argument must be NULL.
- * Returns NULL on error or a pointer to the concatenated string on success.
- * Must free the concatenated string after use.
- */
-    int err = 0;
-    va_list arg_p;
-    char *str;
-    size_t len;
-    char *p;                    /* Buffer pointer */
-    char *t;                    /* Temporary buffer pointer */
-    size_t u = 0;               /* Used memory */
-    size_t s;                   /* Total memory size */
-    size_t n;                   /* Temporary new size */
-
-    if ((p = malloc(STR_BLOCK)) == NULL)
-        return NULL;
-
-    s = STR_BLOCK;
-
-    va_start(arg_p, str1);
-    str = str1;
-    while (str != NULL) {
-        len = strlen(str);
-
-        /* Need to save space for terminating \0 char */
-        if (len >= s - u) {
-            /* Grow buffer */
-            if (AOF(len, 1)) {
-                err = 1;
-                goto clean_up;
-            }
-            n = len + 1 - (s - u);
-            if (AOF(s, n)) {
-                err = 1;
-                goto clean_up;
-            }
-            n += s;
-            if (MOF(n, 2)) {
-                err = 1;
-                goto clean_up;
-            }
-            n *= 2;
-            if ((t = realloc(p, n)) == NULL) {
-                err = 1;
-                goto clean_up;
-            }
-            p = t;
-            s = n;
-        }
-        memcpy(p + u, str, len);
-        u += len;
-
-        str = va_arg(arg_p, char *);
-    }
-
-    *(p + u) = '\0';
-
-  clean_up:
-    va_end(arg_p);
-
-    if (err) {
-        free(p);
-        return NULL;
-    }
-
-    return p;
 }
 
 char *path_join(char *directory_name, char *file_base_name)
@@ -371,16 +408,16 @@ int sys_cmd(char *cmd)
     return 1;
 }
 
-int run_sql(char *db_name, char *ex_dir, char *script_name)
+int run_sql(char *db_name, char *script_dir, char *script_name)
 {
     int ret = 0;
     char *sql_path;
     char *macro_path;
     char *cmd;
 
-    if ((sql_path = path_join(ex_dir, script_name)) == NULL)
+    if ((sql_path = path_join(script_dir, script_name)) == NULL)
         return 1;
-    if ((macro_path = path_join(ex_dir, "macros.m4")) == NULL)
+    if ((macro_path = path_join(script_dir, "macros.m4")) == NULL)
         return 1;
     if ((cmd =
          concat("m4 ", macro_path, " ", sql_path, " | sqlite3 ", db_name,
@@ -401,7 +438,7 @@ int run_sql(char *db_name, char *ex_dir, char *script_name)
     return ret;
 }
 
-int sloth_commit(char *ex_dir, char *msg, char *time, int backup)
+int sloth_commit(char *script_dir, char *msg, char *time, int backup)
 {
     char *cmd;
 
@@ -443,7 +480,7 @@ int sloth_commit(char *ex_dir, char *msg, char *time, int backup)
         free(cmd);
     }
 
-    if (run_sql("sloth_copy.db", ex_dir, "commit.sql"))
+    if (run_sql("sloth_copy.db", script_dir, "commit.sql"))
         return 1;
 
     if (backup) {
@@ -469,7 +506,7 @@ void swap_ch(char *str, char old, char new)
     }
 }
 
-int import_git(char *ex_dir)
+int import_git(char *script_dir)
 {
     FILE *fp;
     size_t fs;
@@ -541,7 +578,7 @@ int import_git(char *ex_dir)
             return 1;
         }
 
-        if (sloth_commit(ex_dir, msg, time, 0)) {
+        if (sloth_commit(script_dir, msg, time, 0)) {
             free(p);
             return 1;
         }
@@ -559,7 +596,7 @@ int import_git(char *ex_dir)
 
 void print_usage(char *prgm_name)
 {
-    fprintf(stderr, "Usage: %1$s init|log|import|export|combine\n"
+    fprintf(stderr, "Usage: %1$s init|log|diff|import|export|combine\n"
             "%1$s subdir prefix_directory_name\n"
             "%1$s combine path_to_other_sloth.db\n"
             "%1$s commit msg [time]\n", prgm_name);
@@ -569,10 +606,11 @@ int main(int argc, char **argv)
 {
     int ret = 0;
     char *prgm_name;
-    char *ex_dir;
+    char *script_dir;
     char *opt = NULL;
     char *subdir = NULL;
     char *other_sloth_path = NULL;
+    char *tmp_dir = NULL;
     char *cmd = NULL;
 
     if (argc < 2) {
@@ -583,7 +621,7 @@ int main(int argc, char **argv)
     if ((prgm_name = strdup(*argv)) == NULL)
         return 1;
 
-    if ((ex_dir = strdup(EX_DIR)) == NULL) {
+    if ((script_dir = strdup(SCRIPT_DIR)) == NULL) {
         ret = 1;
         goto clean_up;
     }
@@ -594,23 +632,23 @@ int main(int argc, char **argv)
     }
 
     if (!strcmp(opt, "init")) {
-        if (run_sql("sloth.db", ex_dir, "ddl.sql")) {
+        if (run_sql("sloth.db", script_dir, "ddl.sql")) {
             ret = 1;
             goto clean_up;
         }
     } else if (!strcmp(opt, "log")) {
-        if (run_sql("sloth.db", ex_dir, "log.sql")) {
+        if (run_sql("sloth.db", script_dir, "log.sql")) {
             ret = 1;
             goto clean_up;
         }
     } else if (!strcmp(opt, "commit")) {
         if (argc == 3) {
-            if (sloth_commit(ex_dir, *(argv + 2), NULL, 1)) {
+            if (sloth_commit(script_dir, *(argv + 2), NULL, 1)) {
                 ret = 1;
                 goto clean_up;
             }
         } else if (argc == 4) {
-            if (sloth_commit(ex_dir, *(argv + 2), *(argv + 3), 1)) {
+            if (sloth_commit(script_dir, *(argv + 2), *(argv + 3), 1)) {
                 ret = 1;
                 goto clean_up;
             }
@@ -620,12 +658,12 @@ int main(int argc, char **argv)
             goto clean_up;
         }
     } else if (!strcmp(opt, "export")) {
-        if (run_sql("sloth.db", ex_dir, "export.sql")) {
+        if (run_sql("sloth.db", script_dir, "export.sql")) {
             ret = 1;
             goto clean_up;
         }
     } else if (!strcmp(opt, "import")) {
-        if (import_git(ex_dir)) {
+        if (import_git(script_dir)) {
             ret = 1;
             goto clean_up;
         }
@@ -659,7 +697,7 @@ int main(int argc, char **argv)
             goto clean_up;
         }
 
-        if (run_sql("sloth_copy.db", ex_dir, "subdir.sql")) {
+        if (run_sql("sloth_copy.db", script_dir, "subdir.sql")) {
             ret = 1;
             goto clean_up;
         }
@@ -698,13 +736,47 @@ int main(int argc, char **argv)
             goto clean_up;
         }
 
-        if (run_sql("sloth_copy.db", ex_dir, "combine.sql")) {
+        if (run_sql("sloth_copy.db", script_dir, "combine.sql")) {
             ret = 1;
             goto clean_up;
         }
 
         /* Atomic on POSIX */
         if (mv_file("sloth_copy.db", "sloth.db")) {
+            ret = 1;
+            goto clean_up;
+        }
+    } else if (!strcmp(opt, "diff")) {
+        if ((tmp_dir = make_tmp_dir(TMP_IN_DIR)) == NULL) {
+            ret = 1;
+            goto clean_up;
+        }
+        if ((cmd =
+             concat("sqlite3 sloth.db \"delete from sloth_tmp_text; ",
+                    "insert into sloth_tmp_text (x) values (\'",
+                    tmp_dir, "\');\"", NULL)) == NULL)
+            return 1;
+
+        if (sys_cmd(cmd)) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        free(cmd);
+        cmd = NULL;
+
+        if (run_sql("sloth.db", script_dir, "diff.sql")) {
+            ret = 1;
+            goto clean_up;
+        }
+
+        /* POSIX */
+        if ((cmd = concat("diff -rspT -u ",
+                          "-x sloth.db -x sloth_copy.db -x .track -x .user -x .log -x .git ",
+                          tmp_dir, " .", NULL)) == NULL)
+            return 1;
+
+        if (sys_cmd(cmd)) {
             ret = 1;
             goto clean_up;
         }
@@ -716,10 +788,11 @@ int main(int argc, char **argv)
 
   clean_up:
     free(prgm_name);
-    free(ex_dir);
+    free(script_dir);
     free(opt);
     free(subdir);
     free(other_sloth_path);
+    free(tmp_dir);
     free(cmd);
 
     return ret;
