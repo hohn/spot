@@ -771,65 +771,79 @@ int insert_file(struct buffer *b, char *fn)
     return 0;
 }
 
-int write_buffer(struct buffer *b, char *fn, int backup_req)
+int write_buffer(struct buffer *b, char *fn)
 {
     /*
-     * Writes a buffer to file. If the file already exists, then it will be
-     * renamed to have a '~' suffix (to serve as a backup).
+     * Writes a buffer to file. The write is performed to the filename, fn,
+     * with the '~' suffix added, and is then moved to filename fn, as the
+     * move is atomic on POSIX systems.
      */
     struct stat st;
-    int backup_ok = 0;
-    size_t len, bk_s, num;
-    char *backup_fn;
+    size_t len, num;
+    char *fn_with_prefix;
     FILE *fp;
     if (fn == NULL)
         return 1;
     /* Nothing to do if saving an unmodified buffer to its default filename */
     if (b->fn != NULL && !strcmp(b->fn, fn) && !b->mod)
         return 0;
-    /* Create backup of the regular file */
-    if (backup_req && !stat(fn, &st) && st.st_mode & S_IFREG) {
-        len = strlen(fn);
-        if (AOF(len, 2))
-            return 1;
-        bk_s = len + 2;
-        if ((backup_fn = malloc(bk_s)) == NULL)
-            return 1;
-        memcpy(backup_fn, fn, len);
-        *(backup_fn + len) = '~';
-        *(backup_fn + len + 1) = '\0';
-#ifdef _WIN32
-        if (!MoveFileEx(fn, backup_fn, MOVEFILE_REPLACE_EXISTING)) {
-            free(backup_fn);
-            return 1;
-        }
-#else
-        if (rename(fn, backup_fn)) {
-            free(backup_fn);
-            return 1;
-        }
-#endif
-        free(backup_fn);
-        backup_ok = 1;
-    }
-    if ((fp = fopen(fn, "wb")) == NULL)
+    /* Create filename with prefix */
+    len = strlen(fn);
+    if (AOF(len, 2))
         return 1;
+    if ((fn_with_prefix = malloc(len + 2)) == NULL)
+        return 1;
+    memcpy(fn_with_prefix, fn, len);
+    *(fn_with_prefix + len) = '~';
+    *(fn_with_prefix + len + 1) = '\0';
+
+    if ((fp = fopen(fn_with_prefix, "wb")) == NULL) {
+        free(fn_with_prefix);
+        return 1;
+    }
     num = (size_t) (b->g - b->a);
     if (fwrite(b->a, 1, num, fp) != num) {
+        free(fn_with_prefix);
         fclose(fp);
         return 1;
     }
     num = (size_t) (b->e - b->c);
     if (fwrite(b->c, 1, num, fp) != num) {
+        free(fn_with_prefix);
         fclose(fp);
         return 1;
     }
-    if (fclose(fp))
+    if (fclose(fp)) {
+        free(fn_with_prefix);
         return 1;
+    }
 #ifndef _WIN32
-    if (backup_ok && chmod(fn, st.st_mode & 0777))
-        return 1;
+/* If old file exists, set the permissions of the new file to be the same */
+    if (!stat(fn, &st) && st.st_mode & S_IFREG) {
+        if (chmod(fn_with_prefix, st.st_mode & 0777)) {
+            free(fn_with_prefix);
+            return 1;
+        }
+    }
 #endif
+
+#ifdef _WIN32
+    if (!MoveFileEx
+        (fn_with_prefix, fn,
+         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        free(fn_with_prefix);
+        return 1;
+    }
+#else
+    /* Atomic on POSIX */
+    if (rename(fn_with_prefix, fn)) {
+        free(fn_with_prefix);
+        return 1;
+    }
+#endif
+
+    free(fn_with_prefix);
+
     /* Clear mod on a successful save to the default buffer filename */
     if (b->fn != NULL && !strcmp(b->fn, fn))
         b->mod = 0;

@@ -772,7 +772,7 @@ int main(int argc, char **argv)
                 running = 0;
                 break;
             case SAVE:
-                cr = write_buffer(cb, cb->fn, 1);
+                cr = write_buffer(cb, cb->fn);
                 goto top;
             case RENAME:
                 delete_buffer(cl);

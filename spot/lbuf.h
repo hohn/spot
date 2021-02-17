@@ -126,7 +126,7 @@ struct mem *init_mem(void);
 void free_mem(struct mem *p);
 int get_file_size(char *fn, size_t * fs);
 int insert_file(struct buffer *b, char *fn);
-int write_buffer(struct buffer *b, char *fn, int backup_req);
+int write_buffer(struct buffer *b, char *fn);
 int rename_buffer(struct buffer *b, char *new_name);
 int buffer_to_str(struct buffer *b, char **p_to_str);
 int buffer_to_mem(struct buffer *b, struct mem *m);
