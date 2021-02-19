@@ -18,7 +18,7 @@ define(SQL_DEBUG,
 [.changes on
 .echo on
 .eqp on
-.expert
+.expert on
 .headers on])
 
 divert
